@@ -1,0 +1,28 @@
+{
+  "name": "fourth-mirror",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A personal Discord bot with room for whatever comes next.",
+  "type": "module",
+  "engines": {
+    "node": ">=24.17.0"
+  },
+  "scripts": {
+    "dev": "node --env-file-if-exists=.env --watch src/index.ts",
+    "start": "node --env-file-if-exists=.env --enable-source-maps dist/index.js",
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test test/*.test.ts",
+    "check": "npm run typecheck && npm test && npm run build",
+    "commands:preview": "node src/scripts/deploy-commands.ts --dry-run",
+    "commands:deploy": "node --env-file-if-exists=.env src/scripts/deploy-commands.ts"
+  },
+  "dependencies": {
+    "discord.js": "^14.27.0",
+    "openai": "^7.45.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "typescript": "~5.9.3"
+  }
+}
