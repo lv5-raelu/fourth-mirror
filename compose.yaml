@@ -1,0 +1,17 @@
+name: fourth-mirror
+
+services:
+  bot:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      AI_HISTORY_FILE: /data/chats.json
+    volumes:
+      - ./data:/data
+    stop_grace_period: 2m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

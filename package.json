@@ -14,15 +14,30 @@
     "typecheck": "tsc --noEmit",
     "test": "node --test test/*.test.ts",
     "check": "npm run typecheck && npm test && npm run build",
+    "cloudflare:probe": "node cloudflare/probe/run.mjs",
+    "cloudflare:typecheck": "tsc -p cloudflare/tsconfig.json --noEmit",
+    "cloudflare:test": "node --test cloudflare/test/*.test.mjs && node cloudflare/test/run.mjs",
+    "cloudflare:check": "npm run check && npm run cloudflare:typecheck && npm run cloudflare:test",
+    "cloudflare:setup": "node cloudflare/scripts/setup.mjs",
+    "cloudflare:secrets": "node cloudflare/scripts/secrets.mjs",
+    "cloudflare:deploy": "npm run cloudflare:check && node cloudflare/scripts/deploy.mjs",
+    "cloudflare:control": "node cloudflare/scripts/control.mjs",
+    "cloudflare:commands": "node cloudflare/scripts/commands.mjs",
+    "cloudflare:update": "node cloudflare/scripts/update.mjs",
+    "cloudflare:soak": "node cloudflare/scripts/soak.mjs",
     "commands:preview": "node src/scripts/deploy-commands.ts --dry-run",
     "commands:deploy": "node --env-file-if-exists=.env src/scripts/deploy-commands.ts"
   },
   "dependencies": {
+    "devalue": "6.0.3",
     "discord.js": "^14.27.0",
     "openai": "^7.45.1"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "5.20261030.1",
     "@types/node": "^24.13.3",
-    "typescript": "~5.9.3"
+    "miniflare": "5.20261023.3-beta",
+    "typescript": "~5.9.3",
+    "wrangler": "4.156.0"
   }
 }

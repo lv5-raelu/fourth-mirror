@@ -4,24 +4,30 @@ import { logger } from './logger.ts';
 
 async function main(): Promise<void> {
   const config = readConfig();
-  const client = await createBot(config);
+  const bot = await createBot(config);
   let stopping = false;
 
   const shutdown = async (reason: string, exitCode = 0): Promise<void> => {
-    if (stopping) return;
+    if (stopping) {
+      if (exitCode) process.exitCode = exitCode;
+      return;
+    }
     stopping = true;
     process.exitCode = exitCode;
     logger.info(`Shutting down (${reason}).`);
 
-    // Bound shutdown even if a connection or a future background task gets stuck.
-    // Unref lets an otherwise idle process exit before the deadline.
-    const timeout = setTimeout(() => process.exit(exitCode || 1), 5_000);
+    // Allow the 90-second web-enabled turn plus delivery and history writes.
+    // The host's 120-second shutdown grace period must exceed this deadline.
+    const timeout = setTimeout(() => {
+      logger.error('Shutdown exceeded 115 seconds; forcing exit.');
+      process.exit(1);
+    }, 115_000);
     timeout.unref();
 
     try {
-      await client.destroy();
+      await bot.stop();
     } catch (error) {
-      logger.error('Could not close the Discord connection cleanly.', error);
+      logger.error('Could not finish pending work and close the Discord connection cleanly.', error);
       process.exitCode = 1;
     }
   };
@@ -40,7 +46,7 @@ async function main(): Promise<void> {
   });
 
   try {
-    await client.login(config.token);
+    await bot.client.login(config.token);
   } catch (error) {
     logger.error('Could not log in. Check the bot token and network connection.', error);
     await shutdown('login failure', 1);

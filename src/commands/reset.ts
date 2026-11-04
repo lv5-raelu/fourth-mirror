@@ -1,11 +1,12 @@
+import { commandDefinitions } from './definitions.ts';
 import { MessageFlags, SlashCommandBuilder } from 'discord.js';
 import { ChatError } from '../chat/types.ts';
 import type { Command } from '../types.ts';
 
 export const reset: Command = {
   data: new SlashCommandBuilder()
-    .setName('reset')
-    .setDescription('Clear the AI’s conversation context in your chat thread.'),
+    .setName(commandDefinitions.reset.name)
+    .setDescription(commandDefinitions.reset.description),
   async execute(interaction, { chat }) {
     if (!chat) {
       await interaction.reply({ content: 'AI chat is not configured yet. Please contact the bot owner.', flags: MessageFlags.Ephemeral });
