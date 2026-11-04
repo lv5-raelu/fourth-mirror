@@ -142,6 +142,13 @@ test('deployment failure requests restart of the existing bot', async () => {
   assert.equal(order.filter(item => item === '/start').length, 1);
 });
 
+test('a failed backup prevents deployment and restarts the existing bot', async () => {
+  const { order, dependencies } = updateFixture({ backup: async () => { throw new Error('backup failed'); } });
+  await assert.rejects(performUpdate(dependencies), /backup failed/);
+  assert.ok(!order.includes('deploy'));
+  assert.equal(order.at(-1), '/start');
+});
+
 test('a lost drain response still attempts recovery; a failed new deployment health check does not restart repeatedly', async () => {
   let starts = 0;
   const first = updateFixture({ control: async path => {

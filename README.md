@@ -8,6 +8,8 @@ For continuous hosting, follow the [Linux VM deployment guide](docs/hosting.md),
 
 The existing bot is now running on Cloudflare with its conversation history migrated. The [Cloudflare deployment guide](docs/cloudflare-deployment.md) covers configuration, private backups, and graceful updates using `npm run cloudflare:update`. Live Gateway and provider checks pass; a 24-hour monitoring run is in progress. The [feasibility report](docs/cloudflare.md) explains the free-plan budget and platform limits.
 
+GitHub Actions checks pull requests and automatically deploys successful updates to `main`. Production updates drain the bot, create an encrypted recovery backup, deploy, and verify Gateway readiness. See the [CI/CD guide](docs/ci-cd.md) for configuration, deployment status, and backup recovery.
+
 ## Get it running
 
 Requires **Node.js 24.17 or newer** and npm. If you use nvm, run `nvm install` and `nvm use` in this directory.
