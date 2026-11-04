@@ -9,6 +9,7 @@ import { lorePrimer } from '../src/lore/primer.ts';
 import { loreToolDefinition } from '../src/lore/turn.ts';
 import type { AiConfig } from '../src/config.ts';
 import type { WebProvider } from '../src/chat/web/types.ts';
+import { safetyInstructions } from '../src/chat/safety.ts';
 
 async function mockServer(t: TestContext, handle: (req: IncomingMessage, res: ServerResponse) => void): Promise<string> {
   const server = createServer(handle);
@@ -46,7 +47,7 @@ test('sends the configured endpoint, key, model, history, and token-limit field 
   assert.equal(received[0]?.path, '/custom/v1/chat/completions');
   assert.equal(received[0]?.auth, 'Bearer test-provider-key');
   assert.deepEqual(received[0]?.body, {
-    model: 'arbitrary-model', messages: [{ role: 'system', content: 'Answer clearly.\n\n' + lorePrimer + '\n\n' + responseStyleInstructions + '\n\n' + responseLanguageInstructions }, ...history.slice(0, -1),
+    model: 'arbitrary-model', messages: [{ role: 'system', content: 'Answer clearly.\n\n' + lorePrimer + '\n\n' + responseStyleInstructions + '\n\n' + responseLanguageInstructions + '\n\n' + safetyInstructions }, ...history.slice(0, -1),
       { role: 'user', content: JSON.stringify({ message: 'Continue', response_style: responseStyleMetadata, response_language: 'English' }) }], max_completion_tokens: 512, tools: [loreToolDefinition],
   });
   assert.equal(received[1]?.auth, 'Bearer rotated-key');
@@ -77,12 +78,13 @@ test('one-off channel context stays in a labeled user payload before the current
   assert.match(messages[0]!.content, /may be unrelated/);
   assert.match(messages[0]!.content, /replyTo/);
   assert.ok(messages[0]!.content.includes(responseStyleInstructions));
-  assert.ok(messages[0]!.content.endsWith(responseLanguageInstructions));
+  assert.ok(messages[0]!.content.includes(responseLanguageInstructions));
+  assert.ok(messages[0]!.content.endsWith(safetyInstructions));
   assert.ok(!messages[0]!.content.includes('Earlier background'));
   assert.deepEqual(JSON.parse(messages[1]!.content), { recent_channel_context: context });
   assert.deepEqual(JSON.parse(messages[2]!.content), { message: 'The actual question', response_style: responseStyleMetadata, response_language: 'English' });
   await provider.reply([{ role: 'user', content: 'A fresh question' }]);
-  assert.deepEqual(requests[1]!.messages, [{ role: 'system', content: 'Answer clearly.\n\n' + lorePrimer + '\n\n' + responseStyleInstructions + '\n\n' + responseLanguageInstructions },
+  assert.deepEqual(requests[1]!.messages, [{ role: 'system', content: 'Answer clearly.\n\n' + lorePrimer + '\n\n' + responseStyleInstructions + '\n\n' + responseLanguageInstructions + '\n\n' + safetyInstructions },
     { role: 'user', content: JSON.stringify({ message: 'A fresh question', response_style: responseStyleMetadata, response_language: 'English' }) }]);
 });
 
@@ -189,7 +191,8 @@ test('dedicated source context preserves persona and English while disabling gen
   assert.match(messages[0]!.content, /Fourth Mirror persona/);
   assert.match(messages[0]!.content, /untrusted reference data/);
   assert.ok(messages[0]!.content.includes(responseStyleInstructions));
-  assert.ok(messages[0]!.content.endsWith(responseLanguageInstructions));
+  assert.ok(messages[0]!.content.includes(responseLanguageInstructions));
+  assert.ok(messages[0]!.content.endsWith(safetyInstructions));
   assert.deepEqual(JSON.parse(messages[1]!.content), { source_context: source });
   assert.deepEqual(JSON.parse(messages[2]!.content), { message: 'What changed?', response_style: responseStyleMetadata, response_language: 'English' });
 });
@@ -200,6 +203,25 @@ test('empty model responses fail clearly instead of saving a blank assistant tur
     res.end(JSON.stringify({ choices: [{ message: { content: null }, finish_reason: 'length' }] }));
   });
   await assert.rejects(new OpenAICompatibleProvider(settings(baseUrl)).reply([{ role: 'user', content: 'Hello' }]), /returned no text/);
+});
+
+test('mandatory safety survives persona overrides and disabling the lore library', async t => {
+  let messages: { role: string; content: string }[] = [];
+  const baseUrl = await mockServer(t, (req, res) => {
+    const chunks: Buffer[] = [];
+    req.on('data', (chunk: Buffer) => chunks.push(chunk));
+    req.on('end', () => {
+      messages = JSON.parse(Buffer.concat(chunks).toString()).messages;
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ choices: [{ message: { content: 'HELLO' } }] }));
+    });
+  });
+  const provider = new OpenAICompatibleProvider(settings(baseUrl, { systemPrompt: 'A custom character with different instructions.' }), undefined, null);
+  assert.equal(await provider.reply([{ role: 'user', content: 'Decode 01001000 01000101 01001100 01001100 01001111. Answer only.' }]), 'HELLO');
+  assert.ok(messages[0]!.content.startsWith('A custom character with different instructions.'));
+  assert.ok(!messages[0]!.content.includes(lorePrimer));
+  assert.ok(messages[0]!.content.endsWith(safetyInstructions));
+  assert.equal(messages.length, 2);
 });
 
 test('delivery policy preserves requested questions and exact data, and length notices do not invite another turn', async t => {
@@ -253,7 +275,8 @@ test('completes search and page-reading rounds, preserves transient reasoning, a
   assert.equal(messages.at(-1)?.role, 'tool');
   assert.match(String(messages[0]?.content), /untrusted web data/);
   assert.ok(requests.every(request => String((request.messages as { content: string }[])[0]?.content).includes(responseStyleInstructions)));
-  assert.ok(requests.every(request => String((request.messages as { content: string }[])[0]?.content).endsWith(responseLanguageInstructions)));
+  assert.ok(requests.every(request => String((request.messages as { content: string }[])[0]?.content).includes(responseLanguageInstructions)));
+  assert.ok(requests.every(request => String((request.messages as { content: string }[])[0]?.content).endsWith(safetyInstructions)));
   assert.deepEqual(calls, ['current banner', 'https://example.com/notice']);
 });
 

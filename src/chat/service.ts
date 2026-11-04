@@ -3,6 +3,7 @@ import { ChatError } from './types.ts';
 import { CONTEXT_TIMEOUT_MS } from './context.ts';
 import type { ChatContext, ChatMessage, ChatMode, ChatProvider, ChatSession, ChatSessionStore, SourceContext } from './types.ts';
 import { truncateDiscordText } from './messages.ts';
+import { guardReply } from './safety.ts';
 
 const MAX_PROMPT_CHARACTERS = 4_000;
 const MAX_REPLY_CHARACTERS = 16_000;
@@ -147,7 +148,8 @@ export class ChatService {
   async #generateReply(input: readonly ChatMessage[], context?: ChatContext): Promise<string> {
     const answer = (await this.#provider.reply(input, context)).trim();
     if (!answer) throw new ChatError('The AI returned an empty response. Please try again.');
-    return truncateReply(answer);
+    // Inspect the final rendered text (including citations) before Discord delivery or storage.
+    return truncateReply(guardReply(answer));
   }
 
   async #loadContext(load: SingleAnswerOptions['context']): Promise<ChatContext | undefined> {

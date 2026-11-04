@@ -157,6 +157,9 @@ export class MockDiscord extends DurableObject {
       this.record('model', { body, authorization: request.headers.get('Authorization') });
       if (this.mode === 'model-failure') return Response.json({ error: { message: 'synthetic failure' } }, { status: 503 });
       if (this.mode === 'slow-model') await new Promise(resolve => setTimeout(resolve, 600));
+      if (this.mode === 'unsafe-model') return Response.json({ choices: [{ message: {
+        role: 'assistant', content: String.fromCharCode(110, 105, 103, 103, 101, 114).toUpperCase(),
+      }, finish_reason: 'stop' }] });
       const last = body.messages.at(-1);
       if (this.mode === 'lore-model') {
         const source = last.role === 'tool' ? JSON.parse(last.content).entries[0]?.source_id : undefined;
