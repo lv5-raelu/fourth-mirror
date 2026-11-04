@@ -161,6 +161,13 @@ export class MockDiscord extends DurableObject {
         role: 'assistant', content: String.fromCharCode(110, 105, 103, 103, 101, 114).toUpperCase(),
       }, finish_reason: 'stop' }] });
       const last = body.messages.at(-1);
+      if (this.mode === 'connection-model') {
+        const envelope = body.messages.find(message => message.role === 'user' && message.content.startsWith('{"lore_context":'));
+        const context = envelope ? JSON.parse(envelope.content).lore_context : undefined;
+        const source = context?.entries.find(item => item.entry.id === 'immortals-delight')?.source_id;
+        return Response.json({ choices: [{ message: { role: 'assistant', content: source && context.connection
+          ? 'This reminds me of Immortal’s Delight! A favorite milk-tea treat. [' + source + ']' : 'No connection was supplied.' }, finish_reason: 'stop' }] });
+      }
       if (this.mode === 'lore-model') {
         const source = last.role === 'tool' ? JSON.parse(last.content).entries[0]?.source_id : undefined;
         return Response.json({ choices: [{ message: last.role === 'user'

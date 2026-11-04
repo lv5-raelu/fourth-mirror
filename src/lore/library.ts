@@ -1,13 +1,15 @@
 import type { LoreEntry, LoreSpoiler } from './types.ts';
+import type { LoreConnection } from './connections.ts';
 
 export const MAX_LORE_CHARACTERS = 8_000;
 export const MAX_LORE_ENTRIES = 5;
-const ambiguous = new Set(['path', 'paths', 'harmony', 'hunt', 'abundance', 'preservation', 'destruction', 'erudition', 'nihility', 'remembrance', 'order', 'credits', 'credit', 'family', 'the family', 'curio', 'curios']);
-const ignored = new Set('a an the of and or to for in on at is are was were be it its what who why how does do can could would should tell me about explain please lore culture cultural setting'.split(' '));
+const ambiguous = new Set(['path', 'paths', 'harmony', 'hunt', 'abundance', 'preservation', 'destruction', 'erudition', 'nihility', 'remembrance', 'order', 'credits', 'credit', 'family', 'the family', 'curio', 'curios',
+  'sunday', 'robin', 'jade', 'blade', 'sparkle', 'cipher', 'march 7', 'march 7th', 'golden hour', 'dreamscape', 'titans', 'janus', 'wildfire', 'propagation', 'ix', 'chimera', 'chimeras', 'dreamers']);
+const ignored = new Set('a an the of and or to for in on at is are was were be it its what who why how does do can could would should tell me about explain please lore culture cultural setting hsr honkai star rail'.split(' '));
 const categoryTerms = {
-  cosmology: ['cosmology', 'aeons', 'paths', 'path'], person: ['characters', 'people'], faction: ['factions', 'organizations', 'organisations', 'guilds'],
+  cosmology: ['cosmology', 'aeons', 'paths', 'path'], person: ['characters', 'people', 'figures'], faction: ['factions', 'organizations', 'organisations', 'guilds', 'politics', 'government', 'governance', 'governs', 'governed', 'institutions'],
   location: ['locations', 'places', 'worlds', 'planets'], lifeform: ['lifeforms', 'lifeform', 'species', 'races'],
-  culture: ['culture', 'cultures', 'customs', 'traditions', 'food'], technology: ['technology', 'technologies', 'inventions'], history: ['history', 'history books'],
+  culture: ['culture', 'cultures', 'customs', 'traditions', 'food', 'foods', 'cuisine', 'drinks', 'eat', 'eating', 'cooking', 'drink', 'drinking'], technology: ['technology', 'technologies', 'inventions'], history: ['history', 'history books', 'historical events', 'events'],
 } as const;
 
 function normalize(value: string): string {
@@ -15,18 +17,22 @@ function normalize(value: string): string {
 }
 function contains(text: string, phrase: string): boolean { return (' ' + text + ' ').includes(' ' + phrase + ' '); }
 
+function directQuestion(question: string): string {
+  return question.replace(/```[\s\S]*?(?:```|$)|`[^`\r\n]*`/g, ' ').replace(/^\s*>.*$/gm, ' ').replace(/"(?:\\.|[^"\\])*"|“[^”]*”|‘[^’]*’|(?<![\p{L}\p{N}])'[^'\r\n]*'(?![\p{L}\p{N}])/gu, ' ');
+}
+
 /** Honor an explicit spoiler-free request in the current question, not quoted/background text. */
 export function requestsSpoilerFreeAnswer(question: string): boolean {
-  const direct = question.replace(/```[\s\S]*?```/g, ' ').replace(/^\s*>.*$/gm, ' ').replace(/"(?:\\.|[^"\\])*"|“[^”]*”|‘[^’]*’|(?<![\p{L}\p{N}])'[^'\r\n]*'(?![\p{L}\p{N}])/gu, ' ');
-  const text = normalize(direct).slice(0, 4_000);
+  const text = normalize(directQuestion(question)).slice(0, 4_000);
   return /\b(?:no (?:plot |story |major |ending )?spoilers?|spoiler free|without (?:any )?spoilers?|avoid (?:plot |story )?spoilers?|don t spoil|do not spoil|(?:don t|do not|never) (?:include|allow|give|show|reveal) (?:any |plot |story )*spoilers?)\b/.test(text);
 }
 
 export class LoreLibrary {
   readonly entries: readonly LoreEntry[];
   readonly #indexed: { entry: LoreEntry; aliases: string[]; words: Set<string> }[];
+  readonly #connections: readonly LoreConnection[];
 
-  constructor(entries: readonly LoreEntry[]) {
+  constructor(entries: readonly LoreEntry[], connections: readonly LoreConnection[] = []) {
     const ids = new Set<string>();
     for (const entry of entries) {
       if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(entry.id) || ids.has(entry.id) || !entry.title.trim() || entry.title.length > 100 ||
@@ -39,10 +45,43 @@ export class LoreLibrary {
       ids.add(entry.id);
     }
     for (const entry of entries) if (entry.related.some(id => !ids.has(id))) throw new Error('Unknown related lore entry: ' + entry.id);
+    const connectionIds = new Set<string>();
+    for (const connection of connections) {
+      if (!connection.id || connectionIds.has(connection.id) || !connection.phrases.length || connection.phrases.some(phrase => !normalize(phrase)) ||
+        !connection.comparison.trim() || !connection.entryIds.length || connection.entryIds.some(id => !entries.some(entry => entry.id === id && entry.spoiler === 'setting' && entry.status === 'released'))) {
+        throw new Error('Invalid lore connection: ' + connection.id);
+      }
+      connectionIds.add(connection.id);
+    }
     this.entries = entries;
+    this.#connections = connections;
     this.#indexed = entries.map(entry => ({ entry, aliases: [...new Set([entry.title, ...entry.aliases].map(normalize))],
       words: new Set(normalize(entry.title + ' ' + entry.aliases.join(' ') + ' ' + entry.content).split(' ')),
     }));
+  }
+
+  /** Suggest one bounded, spoiler-free connection without changing ordinary lore search semantics. */
+  connection(question: string): { comparison: string; concept: string; entries: readonly LoreEntry[] } | undefined {
+    const text = normalize(directQuestion(question)).slice(0, 4_000);
+    // Optional flavor must yield to an explicit opt-out, exact data output, or sensitive personal context.
+    if (/\b(?:no|without|avoid|skip|omit) (?:any )?(?:(?:hsr|star rail|game|lore) )?(?:references|analogies|comparisons|connections)\b|\b(?:don t|do not|stop) (?:mention|mentioning|reference|referencing|bring up|bringing up) (?:hsr|star rail|the game)\b/.test(text) ||
+      /\b(?:only|just) (?:the )?(?:code|json|csv|xml|yaml|sql|number|answer)\b|\b(?:code|json|csv|xml|yaml|sql) only\b/.test(text) ||
+      /\b(?:grief|grieving|bereavement|suicidal|suicide|self harm|racism|discrimination|harassment|abuse|panic attack|depressed|depression|trauma)\b|\b(?:died|dying|assaulted|overwhelmed)\b/.test(text)) return undefined;
+    const matches = this.#connections.flatMap(connection => connection.phrases
+      .filter(phrase => contains(text, normalize(phrase))).map(phrase => ({ connection, phrase }))
+    ).sort((a, b) => b.phrase.length - a.phrase.length);
+    const match = matches[0];
+    if (!match) return undefined;
+    const entries: LoreEntry[] = [];
+    let used = 0;
+    for (const id of match.connection.entryIds) {
+      const entry = this.entries.find(entry => entry.id === id)!;
+      const size = JSON.stringify(entry).length + 60;
+      if (used + size > 3_000) continue;
+      entries.push(entry); used += size;
+      if (entries.length === 2) break;
+    }
+    return entries.length ? { comparison: match.connection.comparison, concept: match.phrase, entries } : undefined;
   }
 
   search(query: string, spoiler: LoreSpoiler = 'story', scope: 'automatic' | 'catalogue' = 'automatic'): readonly LoreEntry[] {
@@ -56,7 +95,8 @@ export class LoreLibrary {
     const categoryQuery = text.replace(/\b(?:hsr|honkai|star|rail|the|in|of|and)\b/g, ' ').replace(/\s+/g, ' ').trim();
     const broad = Object.values(categoryTerms).some(terms => terms.some(term => term === categoryQuery)) ||
       /\b(?:list|overview|what species|which species|what lifeforms|which lifeforms|what factions|which factions|kinds of|types of)\b/.test(text) ||
-      /^(?:tell me about|explain|describe) (?:the )?(?:different |main |major )?(?:species|lifeforms|factions|cultures|worlds|technology|cosmology)\b/.test(text);
+      /^(?:tell me about|explain|describe) (?:the )?(?:different |main |major |important )?(?:species|lifeforms|factions|cultures|worlds|technology|cosmology|characters|history|politics)\b/.test(text) ||
+      /\b(?:main|major|important|key|famous) (?:characters|people|figures|events|locations|worlds|cultures|factions)\b/.test(text);
     const anchored = scope === 'catalogue' || explicit || specific.length > 0;
     if (!anchored) return [];
     const terms = [...new Set(text.split(' ').filter(term => term.length > 2 && !ignored.has(term)))];
