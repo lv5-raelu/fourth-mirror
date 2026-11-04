@@ -85,7 +85,9 @@ test('deduplicates lookups, shares source IDs between search and fetch, and rend
   const linkedMarker = turn.renderCitations('Confirmed. [S1](https://invented.example.com/fake)');
   assert.ok(!linkedMarker.includes('invented.example.com'));
   assert.equal((linkedMarker.match(/https:\/\/example.com\/news/g) || []).length, 1);
-  assert.match(turn.renderCitations('Confirmed.'), /Sources:/);
+  assert.match(turn.renderCitations('Confirmed.'), /\(Source:/);
+  assert.equal(turn.renderCitations('Confirmed. [S1]', false, false), 'Confirmed.');
+  assert.equal(turn.renderCitations('Confirmed.', false, false), 'Confirmed.');
 });
 
 test('limits external calls and returned context, without offering citations for omitted page data', async () => {

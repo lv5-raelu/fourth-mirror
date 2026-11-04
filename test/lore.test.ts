@@ -141,10 +141,10 @@ test('story entries are available by default while explicit spoiler-free request
 test('story citations conceal untagged paragraphs and revealing source titles without hiding setting paragraphs or rewriting code/data', () => {
   const story = { ...fixture, id: 'test-story', title: 'Synthetic Story', aliases: ['synthetic story'], spoiler: 'story' as const,
     sources: [{ ...fixture.sources[0]!, title: 'The archivist || is the saboteur', url: 'https://example.com/story_(ending)||' }] };
-  const turn = new LoreTurn(new LoreLibrary([fixture, story]), 'Explain synthetic story.');
+  const turn = new LoreTurn(new LoreLibrary([fixture, story]), 'Explain synthetic story. Cite sources.');
   const initial = JSON.parse(turn.initial('Explain synthetic story.')!);
   const marker = initial.entries.find((item: { entry: LoreEntry }) => item.entry.id === story.id).source_id;
-  const link = '[The archivist \\|\\| is the saboteur](https://example.com/story_%28ending%29%7C%7C)';
+  const link = '(Source: [The archivist \\|\\| is the saboteur](<https://example.com/story_%28ending%29%7C%7C>))';
   assert.equal(turn.renderCitations(`A public setting fact.\n\nThe archivist is the saboteur. [${marker}]`), `A public setting fact.\n\n||The archivist is the saboteur. ${link}||`);
   assert.equal(turn.renderCitations(`The outcome: ||the expedition ends.|| [${marker}]`), `||The outcome: the expedition ends. ${link}||`);
   assert.equal(turn.renderCitations(`||The expedition ends. [${marker}]||`), `||The expedition ends. ${link}||`);
@@ -159,7 +159,7 @@ test('story citations conceal untagged paragraphs and revealing source titles wi
 
 test('lore turn bounds lookups, caches identical queries, preserves source attribution, and renders only supplied citations', () => {
   const library = new LoreLibrary([fixture, { ...fixture, id: 'test-account', title: 'Synthetic account', aliases: ['synthetic account'], status: 'in-universe-account' }]);
-  const turn = new LoreTurn(library, 'Explain synthetic lore.');
+  const turn = new LoreTurn(library, 'Explain synthetic lore. Cite sources.');
   const initial = JSON.parse(turn.initial('Explain synthetic lore.')!);
   assert.equal(initial.entries[0].source_id, 'L1');
   assert.equal(initial.entries[0].entry.release, '1.0');
@@ -167,10 +167,10 @@ test('lore turn bounds lookups, caches identical queries, preserves source attri
   const account = turn.run('{"query":"synthetic account"}');
   assert.equal(turn.run('{"query":"synthetic account"}'), account);
   assert.match(account, /in-universe-account/);
-  assert.equal(turn.renderCitations('Fact [L1](https://invented.example/). Unknown [L99].'), 'Fact [Synthetic reference](https://example.com/lore). Unknown .');
+  assert.equal(turn.renderCitations('Fact [L1](https://invented.example/). Unknown [L99].'), 'Fact (Source: [Synthetic reference](<https://example.com/lore>)). Unknown.');
   assert.equal(turn.renderCitations('{"literal":"[L1]"}'), '{"literal":"[L1]"}');
   assert.equal(turn.renderCitations('```python\nvalue = "[L1]"\n```'), '```python\nvalue = "[L1]"\n```');
-  assert.equal(turn.renderCitations('Keep `[L1]` literal. Fact [L1].'), 'Keep `[L1]` literal. Fact [Synthetic reference](https://example.com/lore).');
+  assert.equal(turn.renderCitations('Keep `[L1]` literal. Fact [L1].'), 'Keep `[L1]` literal. Fact (Source: [Synthetic reference](<https://example.com/lore>)).');
   assert.match(turn.run('not JSON'), /error/);
   assert.match(turn.run(JSON.stringify({ query: 'x'.repeat(241) })), /error/);
   for (let index = 0; index < 5; index++) turn.run(JSON.stringify({ query: 'synthetic lore ' + index }));

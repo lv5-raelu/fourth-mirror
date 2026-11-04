@@ -36,7 +36,7 @@ async function setup(t: TestContext) {
 test('only the owner’s text in a registered private thread reaches the AI, with mentions disabled', async (t) => {
   const { context, service, inputs } = await setup(t);
   await service.create(ownerId, async () => threadId);
-  const sent: { content: string; allowedMentions: { parse: string[]; repliedUser: boolean } }[] = [];
+  const sent: { content: string; flags: MessageFlags; allowedMentions: { parse: string[]; repliedUser: boolean } }[] = [];
   const message = {
     guildId, channelId: threadId, author: { id: ownerId, bot: false }, webhookId: null, system: false,
     attachments: new Map(), stickers: new Map(), content: 'Hello',
@@ -66,7 +66,7 @@ test('only the owner’s text in a registered private thread reaches the AI, wit
   assert.equal(sent.length, 2);
   assert.equal(sent.map((payload) => payload.content).join(''), '@everyone ' + 'x'.repeat(2_200));
   assert.ok(sent.every((payload) => payload.content.length <= 2_000));
-  assert.ok(sent.every((payload) => payload.allowedMentions.parse.length === 0 && !payload.allowedMentions.repliedUser));
+  assert.ok(sent.every((payload) => payload.flags === MessageFlags.SuppressEmbeds && payload.allowedMentions.parse.length === 0 && !payload.allowedMentions.repliedUser));
 });
 
 test('/chat creates a private thread without parent-channel Send Messages, records its owner, and /reset clears its context', async (t) => {
@@ -181,7 +181,7 @@ test('group members can mention or reply to the bot, while side conversations st
   await service.create(ownerId, async () => threadId, 'group');
   const botId = '823456789012345678';
   const peer = '623456789012345678';
-  const sent: { content: string; reply?: { messageReference: string }; allowedMentions: { parse: string[]; repliedUser: boolean } }[] = [];
+  const sent: { content: string; flags: MessageFlags; reply?: { messageReference: string }; allowedMentions: { parse: string[]; repliedUser: boolean } }[] = [];
   const base = {
     id: '923456789012345678', guildId, channelId: threadId, author: { id: peer, bot: false, displayName: 'Alex' },
     client: { user: { id: botId } }, mentions: { users: new Map() }, member: { displayName: 'Alex' },
@@ -198,7 +198,7 @@ test('group members can mention or reply to the bot, while side conversations st
   await handleChatMessage({ ...base, content: '<@' + botId + '> Explain this', mentions: { users: new Map([[botId, {}]]) } } as unknown as Message, context);
   assert.deepEqual(inputs, ['Explain this']);
   assert.ok(sent.every(payload => payload.reply?.messageReference === base.id));
-  assert.ok(sent.every(payload => payload.allowedMentions.parse.length === 0 && !payload.allowedMentions.repliedUser));
+  assert.ok(sent.every(payload => payload.flags === MessageFlags.SuppressEmbeds && payload.allowedMentions.parse.length === 0 && !payload.allowedMentions.repliedUser));
   await handleChatMessage({ ...base, id: '943456789012345678', author: { ...base.author, id: '723456789012345678' }, content: 'What about the follow-up?',
     reference: { type: 0, messageId: '953456789012345678', channelId: threadId }, fetchReference: async () => ({ author: { id: botId }, webhookId: null }),
   } as unknown as Message, context);
@@ -236,7 +236,7 @@ test('channel mentions answer in place with recent context, while ordinary repli
   const { context, service, inputs, contexts } = await setup(t);
   const botId = '823456789012345678';
   const channelId = '723456789012345678';
-  const sent: { content: string; reply?: { messageReference: string }; allowedMentions: { parse: string[]; repliedUser: boolean } }[] = [];
+  const sent: { content: string; flags: MessageFlags; reply?: { messageReference: string }; allowedMentions: { parse: string[]; repliedUser: boolean } }[] = [];
   const reads: unknown[] = [];
   const channel = {
     type: ChannelType.GuildText,
@@ -277,7 +277,7 @@ test('channel mentions answer in place with recent context, while ordinary repli
     { id: '903456789012345678', author: 'Pat', content: 'That sounds useful.' },
   ], referencedMessages: [{ id: '901456789012345678', author: 'Organizer', content: 'The original schedule.' }] });
   assert.equal(service.getSession(channelId), undefined);
-  assert.ok(sent.every(payload => payload.reply?.messageReference === base.id && payload.allowedMentions.parse.length === 0 && !payload.allowedMentions.repliedUser));
+  assert.ok(sent.every(payload => payload.reply?.messageReference === base.id && payload.flags === MessageFlags.SuppressEmbeds && payload.allowedMentions.parse.length === 0 && !payload.allowedMentions.repliedUser));
   const calls = inputs.length;
   await handleChatMessage({ ...base, content: 'And tomorrow?', reference: { messageId: 'bot-answer' } } as unknown as Message, context);
   assert.equal(inputs.length, calls);

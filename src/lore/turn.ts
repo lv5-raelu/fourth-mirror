@@ -2,6 +2,7 @@ import type { ChatCompletionTool } from 'openai/resources/chat/completions';
 import { requestsSpoilerFreeAnswer, LoreLibrary, MAX_LORE_CHARACTERS } from './library.ts';
 import type { LoreEntry } from './types.ts';
 import { hideSpoilerText, spoilerSpans } from '../chat/spoilers.ts';
+import { literalJson, renderSourceMarkers, requestsLoreSources, sourceLinksToMarkers } from '../chat/citations.ts';
 
 export const loreToolDefinition: ChatCompletionTool = { type: 'function', function: {
   name: 'lore_search',
@@ -12,12 +13,17 @@ export const loreToolDefinition: ChatCompletionTool = { type: 'function', functi
 export class LoreTurn {
   readonly #library: LoreLibrary;
   readonly #story: boolean;
+  readonly #showSources: boolean;
   readonly #sources = new Map<string, { marker: string; entry: LoreEntry }>();
   readonly #cache = new Map<string, string>();
   #calls = 0;
   #characters = 0;
 
-  constructor(library: LoreLibrary, question: string) { this.#library = library; this.#story = !requestsSpoilerFreeAnswer(question); }
+  constructor(library: LoreLibrary, question: string) {
+    this.#library = library;
+    this.#story = !requestsSpoilerFreeAnswer(question);
+    this.#showSources = requestsLoreSources(question);
+  }
 
   initial(question: string): string | undefined {
     const entries = this.#library.search(question.slice(0, 500), this.#story ? 'story' : 'setting');
@@ -63,21 +69,15 @@ export class LoreTurn {
   renderCitations(answer: string): string {
     if (!this.#sources.size) return answer;
     // Citation-shaped strings can be the exact data/code the user requested.
-    try { JSON.parse(answer); return answer; } catch { /* Ordinary prose can contain citations. */ }
+    if (literalJson(answer)) return answer;
+    const references = new Map([...this.#sources.values()].map(source => [source.marker, source.entry.sources]));
+    answer = sourceLinksToMarkers(answer, references);
     answer = this.#hideStoryParagraphs(answer);
     // If story reference material was supplied but the model omitted tags and usable citations,
     // conceal its prose conservatively, including uncited paraphrases and requests to remove tags.
     if ([...this.#sources.values()].some(source => source.entry.spoiler === 'story') && !spoilerSpans(answer).length &&
       !/```/.test(answer)) answer = hideSpoilerText(answer);
-    const render = (prose: string): string => prose.replace(/\[L(\d+)\](?:\([^\r\n)]*\))?/g, (_match, id: string) => {
-      const source = [...this.#sources.values()].find(value => value.marker === 'L' + id);
-      if (!source) return '';
-      return source.entry.sources.map(reference => {
-        const title = reference.title.replace(/[\[\]\\\r\n]/g, '').slice(0, 100).replace(/\|/g, '\\|');
-        return `[${title}](${reference.url.replace(/[()|]/g, value => value === '(' ? '%28' : value === ')' ? '%29' : '%7C')})`;
-      }).join(' ');
-    });
-    return answer.split(/(```[\s\S]*?```|`[^`\r\n]*`)/g).map((part, index) => index % 2 ? part : render(part)).join('');
+    return renderSourceMarkers(answer, 'L', references, this.#showSources);
   }
 
   #hideStoryParagraphs(answer: string): string {

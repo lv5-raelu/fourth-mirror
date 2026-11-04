@@ -1,4 +1,4 @@
-import { ChannelType, DiscordAPIError, Events, Routes } from 'discord.js';
+import { ChannelType, DiscordAPIError, Events, MessageFlags, Routes } from 'discord.js';
 import type { Client, Message } from 'discord.js';
 import { splitDiscordMessage } from '../chat/messages.ts';
 import { ChatError } from '../chat/types.ts';
@@ -36,7 +36,7 @@ export async function handleChatMessage(message: Message, context: BotContext): 
   }
   const channel = message.channel;
   const send = async (content: string): Promise<void> => {
-    const payload = { content, allowedMentions: { parse: [], repliedUser: false } };
+    const payload = { content, flags: MessageFlags.SuppressEmbeds as const, allowedMentions: { parse: [], repliedUser: false } };
     try {
       await channel.send({ ...payload,
         ...(group || standalone ? { reply: { messageReference: message.id, failIfNotExists: false } } : {}),
