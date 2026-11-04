@@ -14,3 +14,6 @@ AI_REASONING_EFFORT=
 AI_SYSTEM_PROMPT=
 WEB_API_KEY=
 WEB_BASE_URL=https://api.deepseek.com/v1/tools
+
+# Image input is enabled by default. Set false for models without vision.
+AI_VISION_ENABLED=true

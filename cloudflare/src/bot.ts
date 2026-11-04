@@ -24,6 +24,8 @@ import type { BetaMessage } from '../../src/beta/types.ts';
 import { latestMessage } from '../../src/beta/presentation.ts';
 import { betaChannelPermissions } from '../../src/beta/permissions.ts';
 import { loreCatalogueInfo } from '../../src/lore/index.ts';
+import { collectDiscordMedia } from '../../src/chat/media.ts';
+import type { DiscordAttachment, DiscordEmbed, DiscordSticker } from '../../src/chat/media.ts';
 
 interface User { id: string; bot?: boolean; username?: string; global_name?: string }
 interface InteractionOption { name: string; type?: number; value?: unknown; options?: InteractionOption[] }
@@ -34,7 +36,7 @@ interface Interaction {
 }
 interface Message {
   id: string; guild_id?: string; channel_id: string; author: User; content: string;
-  webhook_id?: string; type?: number; attachments?: unknown[]; sticker_items?: unknown[];
+  webhook_id?: string; type?: number; attachments?: DiscordAttachment[]; sticker_items?: DiscordSticker[]; embeds?: DiscordEmbed[];
   mentions?: User[]; member?: { nick?: string };
   message_reference?: { type?: number; message_id?: string; channel_id?: string };
   referenced_message?: { author: User; webhook_id?: string } | null;
@@ -228,8 +230,8 @@ export class DiscordBot extends DurableObject<Env> {
       await this.rest.request('PUT', `/channels/${thread.id}/thread-members/${member.user.id}`, undefined, { deadlineMs: remaining() });
       await this.rest.message(thread.id,
         mode === 'group'
-          ? 'Your public group chat is ready. Anyone who can view the parent channel can see and join this thread. Mention me or reply to one of my messages to ask a question. Addressed questions share one history and replies are queued in order. Only the person who started this chat can use /reset.\n\nAddressed messages are sent to the AI provider. Attachments are not supported.'
-          : 'Your chat is ready. Send a text message and I’ll reply here. Use /reset to start with fresh context.\n\nMessages are sent to the bot’s AI provider. Server moderators can access private threads. Attachments are not supported.', entry.id + 'w', remaining());
+          ? 'Your public group chat is ready. Anyone who can view the parent channel can see and join this thread. Mention me or reply to one of my messages to ask a question. Addressed questions share one history and replies are queued in order. Only the person who started this chat can use /reset.\n\nAddressed messages are sent to the AI provider. Images, custom emojis, stickers, and GIFs can be sent for visual understanding.'
+          : 'Your chat is ready. Send a message or image and I’ll reply here. Use /reset to start with fresh context.\n\nMessages are sent to the bot’s AI provider. Server moderators can access private threads. Images, custom emojis, stickers, and GIFs can be sent for visual understanding.', entry.id + 'w', remaining());
       return thread.id;
     }, mode);
     await edit(`Your conversation is ready: <#${threadId}>`);
@@ -267,11 +269,10 @@ export class DiscordBot extends DurableObject<Env> {
           } catch { return false; }
         };
       }
-      if (message.attachments?.length || message.sticker_items?.length) {
-        await send('This chat supports text messages. Please send your question without attachments or stickers.', 'a'); return;
-      }
       const prompt = typeof message.content === 'string' ? (group || standalone ? withoutBotMention(message.content, this.config.applicationId) : message.content) : '';
-      if (!prompt.trim()) {
+      const media = collectDiscordMedia({ ...message, content: prompt });
+      if (media.length && this.config.ai?.vision === false) throw new ChatError('Image understanding is disabled for this bot’s model. Please send a text question.');
+      if (!prompt.trim() && !media.length) {
         await send(standalone ? 'Add a text question after mentioning me.' : 'I couldn’t read that message. Send text; if this keeps happening, ask the bot owner to check Message Content Intent.', 'n'); return;
       }
       const showTyping = (): void => {
@@ -285,8 +286,10 @@ export class DiscordBot extends DurableObject<Env> {
       const speakerName = message.member?.nick || message.author.global_name || message.author.username || 'User';
       const onStart = (): void => { deadline = Date.now() + 110_000; showTyping(); };
       if (standalone) await this.chat!.answer(message.author.id, prompt, deliver, {
+        media,
         onStart,
         context: () => loadChannelContext(speakerName, message.channel_id, message.id, {
+          ...(sameThreadReply(message) ? { referenceId: sameThreadReply(message)! } : {}),
           recent: (limit, signal) => this.rest.request<DiscordContextMessage[]>('GET', `/channels/${message.channel_id}/messages`, undefined,
             { deadlineMs: Math.min(CONTEXT_TIMEOUT_MS, remaining()), query: { before: message.id, limit }, signal }),
           message: (id, signal) => this.rest.request<DiscordContextMessage>('GET', `/channels/${message.channel_id}/messages/${id}`, undefined,
@@ -294,6 +297,7 @@ export class DiscordBot extends DurableObject<Env> {
         }),
       });
       else await this.chat!.reply(message.channel_id, message.author.id, prompt, deliver, {
+        media,
         speakerName,
         ...(shouldRespond ? { shouldRespond } : {}),
         onStart,

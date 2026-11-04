@@ -9,6 +9,8 @@ import type { ChatInputCommandInteraction, Message } from 'discord.js';
 import { ChatService } from '../src/chat/service.ts';
 import { ChatStore } from '../src/chat/store.ts';
 import type { ChatContext } from '../src/chat/types.ts';
+import type { ChatMessage } from '../src/chat/types.ts';
+import { imageUrl } from './fixtures/media.ts';
 import { chat as chatCommand } from '../src/commands/chat.ts';
 import { reset } from '../src/commands/reset.ts';
 import { handleChatMessage } from '../src/events/message-create.ts';
@@ -23,15 +25,41 @@ async function setup(t: TestContext) {
   t.after(() => rm(directory, { recursive: true, force: true }));
   const inputs: string[] = [];
   const contexts: (ChatContext | undefined)[] = [];
-  const service = new ChatService({ reply: async (messages, context) => { inputs.push(messages.at(-1)!.content); contexts.push(context); return '@everyone ' + 'x'.repeat(2_200); } }, await ChatStore.open(join(directory, 'chats.json')));
+  const turns: (readonly ChatMessage[])[] = [];
+  const service = new ChatService({ reply: async (messages, context) => { turns.push(messages); inputs.push(messages.at(-1)!.content); contexts.push(context); return '@everyone ' + 'x'.repeat(2_200); } }, await ChatStore.open(join(directory, 'chats.json')));
   const context: BotContext = {
     config: { token: 'unused', applicationId: '423456789012345678', guildId, ai: null, web: null },
     logger: { info: () => {}, warn: () => {}, error: () => {} },
     commands: new Map(),
     chat: service,
   };
-  return { context, service, inputs, contexts };
+  return { context, service, inputs, contexts, turns };
 }
+
+test('media-only personal, group, and standalone messages reach the shared chat path', async t => {
+  const botId = '423456789012345678';
+  for (const mode of ['personal', 'group', 'standalone'] as const) {
+    const { context, service, turns } = await setup(t);
+    if (mode !== 'standalone') await service.create(ownerId, async () => threadId, mode);
+    const sent: { content: string }[] = [];
+    const addressed = mode !== 'personal';
+    const message = {
+      id: '923456789012345678', guildId, channelId: threadId, author: { id: ownerId, bot: false, displayName: 'Rae' }, webhookId: null, system: false,
+      content: addressed ? '<@' + botId + '>' : '', client: { user: { id: botId }, rest: { get: async () => [] } },
+      mentions: { users: new Map([[botId, {}]]) }, stickers: new Map(),
+      attachments: new Map([['image', { url: imageUrl, name: 'screen.png', size: 100, contentType: 'image/png' }]]),
+      channel: { type: mode === 'personal' ? ChannelType.PrivateThread : mode === 'group' ? ChannelType.PublicThread : ChannelType.GuildText,
+        send: async (payload: { content: string }) => { sent.push(payload); }, sendTyping: async () => {},
+      },
+    };
+    await handleChatMessage(message as unknown as Message, context);
+    assert.equal(turns.length, 1, mode);
+    assert.equal(turns[0]?.[0]?.content, 'Respond to the attached media.');
+    assert.equal(turns[0]?.[0]?.media?.[0]?.url, imageUrl);
+    assert.equal(sent.length, 2);
+    assert.equal(Boolean(service.getSession(threadId)), mode !== 'standalone');
+  }
+});
 
 test('only the owner’s text in a registered private thread reaches the AI, with mentions disabled', async (t) => {
   const { context, service, inputs } = await setup(t);

@@ -20,6 +20,11 @@ let serial = 553456789012345678n;
 const nextId = () => String(serial++);
 const checks = [];
 function pass(text) { checks.push(text); console.log('PASS ' + text); }
+function latestPrompt(call) {
+  const content = call.body.messages.at(-1).content;
+  const text = typeof content === 'string' ? content : content.find(part => part.type === 'text')?.text;
+  try { return JSON.parse(text).message; } catch { return undefined; }
+}
 let mf;
 
 function bundle(entry, name) {
@@ -184,6 +189,27 @@ try {
   await command('reset', { channel_id: session.threadId, member: { user: { id: session.ownerId }, permissions } });
   assert.equal((await history()).find(value => value.threadId === session.threadId).history.length, 0);
   pass('Attachments receive an explanation; /reset enforces ownership and clears saved context');
+
+  const visual = await createChat(nextId(), 'group');
+  const cdn = 'https://cdn.discordapp.com/attachments/123456789012345678/223456789012345678/';
+  const visualMessage = message(visual, '<@123456789012345678>', { author: { id: nextId() }, mentions: [{ id: '123456789012345678' }],
+    attachments: [{ url: cdn + 'screen.png', filename: 'screen.png', size: 100 }, { url: cdn + 'dance.gif', filename: 'dance.gif', size: 200 }],
+    sticker_items: [{ id: '123456789012345678', name: 'APNG', format_type: 2 }, { id: '223456789012345678', name: 'Lottie', format_type: 3 }],
+  });
+  await emit('MESSAGE_CREATE', visualMessage); await complete(visualMessage.id);
+  let visualTurn = (await observations('model')).at(-1).body.messages.at(-1);
+  assert.ok(Array.isArray(visualTurn.content));
+  assert.equal(visualTurn.content.filter(part => part.type === 'image_url').length, 12, JSON.stringify(visualTurn.content.filter(part => part.type === 'text')));
+  assert.equal(JSON.parse(visualTurn.content[0].text).response_language, 'English');
+  assert.ok(!visualTurn.content.some(part => part.text?.includes('unavailable')));
+  const visualSaved = (await history()).find(value => value.threadId === visual.threadId);
+  assert.equal(visualSaved.history[0].media.length, 4);
+  assert.ok(!JSON.stringify(visualSaved).includes('data:image'));
+  const followVisual = message(visual, '<@123456789012345678> What happened in those animations?', { author: { id: nextId() }, mentions: [{ id: '123456789012345678' }] });
+  await emit('MESSAGE_CREATE', followVisual); await complete(followVisual.id);
+  assert.ok((await observations('model')).at(-1).body.messages.some(turn => Array.isArray(turn.content) && turn.content.some(part => part.type === 'image_url')));
+  assert.ok((await observations('media')).every(call => call.authorization === null));
+  pass('Workers process PNG, GIF, APNG, and Lottie media-only turns, preserve visual follow-ups, and store references only');
 
   const group = await createChat(nextId(), 'group', String(BigInt(permissions) & ~(1n << 36n) & ~2048n));
   assert.equal(group.mode, 'group');
@@ -544,10 +570,10 @@ try {
   await control({ mode: 'slow-model' });
   const interrupted = message(interruptedSession, 'interrupted synthetic turn');
   await emit('MESSAGE_CREATE', interrupted);
-  await eventually(async () => (await observations('model')).some(call => JSON.parse(call.body.messages.at(-1).content).message === interrupted.content), 'interrupted provider call began');
+  await eventually(async () => (await observations('model')).some(call => latestPrompt(call) === interrupted.content), 'interrupted provider call began');
   const interruptedMention = { ...mention, id: nextId(), author: { id: nextId() }, content: '<@' + botId + '> Interrupted quick question' };
   await emit('MESSAGE_CREATE', interruptedMention);
-  await eventually(async () => (await observations('model')).some(call => JSON.parse(call.body.messages.at(-1).content).message === 'Interrupted quick question'), 'interrupted one-off provider call began');
+  await eventually(async () => (await observations('model')).some(call => latestPrompt(call) === 'Interrupted quick question'), 'interrupted one-off provider call began');
   const paidCalls = (await observations('model')).length;
   await response('/__crash', 'POST');
   await eventually(async () => (await journal(interrupted.id))?.status === 'recovered', 'recovery notification');
@@ -584,14 +610,14 @@ try {
   const drainGroup = await createChat(nextId(), 'group');
   await control({ mode: 'slow-model' });
   const slow = message(drainSession, 'drained synthetic turn'); await emit('MESSAGE_CREATE', slow);
-  await eventually(async () => (await observations('model')).some(call => JSON.parse(call.body.messages.at(-1).content).message === slow.content), 'drain provider call began');
+  await eventually(async () => (await observations('model')).some(call => latestPrompt(call) === slow.content), 'drain provider call began');
   const groupActive = message(drainGroup, '<@' + botId + '> Active group turn', { author: { id: nextId() }, mentions: [{ id: botId }] });
   const groupQueued = message(drainGroup, '<@' + botId + '> Queued group turn', { author: { id: nextId() }, mentions: [{ id: botId }] });
   await emit('MESSAGE_CREATE', groupActive);
   await eventually(async () => (await observations('model')).some(call => call.body.messages.at(-1).content.includes('Active group turn')), 'active group drain call');
   const drainMention = { ...mention, id: nextId(), author: { id: nextId() }, content: '<@' + botId + '> Quick question during update' };
   await emit('MESSAGE_CREATE', drainMention);
-  await eventually(async () => (await observations('model')).some(call => JSON.parse(call.body.messages.at(-1).content).message === 'Quick question during update'), 'active one-off drain call');
+  await eventually(async () => (await observations('model')).some(call => latestPrompt(call) === 'Quick question during update'), 'active one-off drain call');
   await emit('MESSAGE_CREATE', groupQueued);
   await eventually(async () => (await journal(groupQueued.id))?.status === 'pending', 'group turn is queued');
   const draining = request('/drain', 'POST');

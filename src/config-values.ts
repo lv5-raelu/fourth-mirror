@@ -8,6 +8,7 @@ export interface AiConfig {
   readonly historyFile: string;
   readonly reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
   readonly loreTools?: boolean;
+  readonly vision?: boolean;
 }
 
 export interface WebConfig {
@@ -80,6 +81,7 @@ function readAiConfig(env: ConfigEnvironment, problems: string[], loadPrompt: ()
   const maxOutputTokens = Number(outputTokens);
   const reasoningEffort = env.AI_REASONING_EFFORT?.trim();
   const loreTools = env.AI_LORE_TOOLS?.trim();
+  const vision = env.AI_VISION_ENABLED?.trim();
   const reasoningEfforts = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
 
   if (!model) problems.push('AI_MODEL is required when AI_API_KEY is set.');
@@ -102,6 +104,7 @@ function readAiConfig(env: ConfigEnvironment, problems: string[], loadPrompt: ()
   const effort = reasoningEfforts.find(value => value === reasoningEffort);
   if (reasoningEffort && !effort) problems.push('AI_REASONING_EFFORT must be none, minimal, low, medium, high, xhigh, or max.');
   if (loreTools && !['true', 'false'].includes(loreTools)) problems.push('AI_LORE_TOOLS must be true or false.');
+  if (vision && !['true', 'false'].includes(vision)) problems.push('AI_VISION_ENABLED must be true or false.');
 
   let systemPrompt = '';
   try {
@@ -120,6 +123,7 @@ function readAiConfig(env: ConfigEnvironment, problems: string[], loadPrompt: ()
     historyFile: env.AI_HISTORY_FILE?.trim() || 'data/chats.json',
     ...(effort ? { reasoningEffort: effort } : {}),
     ...(loreTools ? { loreTools: loreTools === 'true' } : {}),
+    ...(vision ? { vision: vision === 'true' } : {}),
   };
 }
 

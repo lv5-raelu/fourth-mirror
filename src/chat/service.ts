@@ -1,7 +1,8 @@
 import { MAX_HISTORY_CHARACTERS, MAX_HISTORY_MESSAGES } from './limits.ts';
 import { ChatError } from './types.ts';
 import { CONTEXT_TIMEOUT_MS } from './context.ts';
-import type { ChatContext, ChatMessage, ChatMode, ChatProvider, ChatSession, ChatSessionStore, SourceContext } from './types.ts';
+import type { ChatContext, ChatMedia, ChatMessage, ChatMode, ChatProvider, ChatSession, ChatSessionStore, SourceContext } from './types.ts';
+import { MAX_MESSAGE_MEDIA, validMedia } from './media.ts';
 import { truncateDiscordText } from './messages.ts';
 import { guardReply } from './safety.ts';
 
@@ -13,12 +14,14 @@ const MAX_GROUP_TURNS = 4;
 const MAX_GROUP_PENDING = 12;
 
 export interface ChatReplyOptions {
+  readonly media?: readonly ChatMedia[];
   readonly speakerName?: string;
   readonly onStart?: () => void;
   readonly shouldRespond?: () => Promise<boolean>;
 }
 
 export interface SingleAnswerOptions {
+  readonly media?: readonly ChatMedia[];
   readonly onStart?: () => void;
   readonly context?: () => Promise<ChatContext>;
   readonly source?: () => Promise<SourceContext>;
@@ -81,7 +84,7 @@ export class ChatService {
     if (!this.#accepting) throw restarting();
     const session = this.#replySession(threadId, userId);
     const group = session.mode === 'group';
-    const content = this.#validateRequest(userId, prompt);
+    const content = this.#validateRequest(userId, prompt, options.media);
     if (!group && this.#busyThreads.has(threadId)) {
       throw new ChatError('I’m still working on your previous message. Please wait for that reply.');
     }
@@ -112,7 +115,7 @@ export class ChatService {
 
   // A mention outside a chat is one independent turn, with no session or history writes.
   async answer(userId: string, prompt: string, deliver: (text: string) => Promise<void>, options: SingleAnswerOptions = {}): Promise<void> {
-    const content = this.#validateRequest(userId, prompt);
+    const content = this.#validateRequest(userId, prompt, options.media);
     if (this.#busyUsers.size >= MAX_CONCURRENT_REQUESTS) throw new ChatError('All chat slots are busy. Please try again shortly.');
     this.#lastRequest.set(userId, this.#now());
     await this.#takeSlot(userId, false);
@@ -124,15 +127,16 @@ export class ChatService {
       const source = await options.source?.();
       const context = source ? { questionAuthor: 'User', recentMessages: [], source } : await this.#loadContext(options.context);
       if (!this.#accepting) throw restarting();
-      await deliver(await this.#generateReply([{ role: 'user', content }], context));
+      await deliver(await this.#generateReply([{ role: 'user', content, ...(options.media?.length ? { media: options.media } : {}) }], context));
     } finally {
       this.#releaseSlot(userId);
     }
   }
 
-  #validateRequest(userId: string, prompt: string): string {
+  #validateRequest(userId: string, prompt: string, media?: readonly ChatMedia[]): string {
     if (!this.#accepting) throw restarting();
-    const content = prompt.trim();
+    if (media && (media.length > MAX_MESSAGE_MEDIA || !media.every(validMedia))) throw new ChatError('Invalid or excessive media. Please send at most four supported images.');
+    const content = prompt.trim() || (media?.length ? 'Respond to the attached media.' : '');
     if (!content) throw new ChatError('Send a text message to chat.');
     if (content.length > MAX_PROMPT_CHARACTERS) throw new ChatError('Please keep each message under 4,000 characters.');
     if (this.#busyUsers.has(userId) || this.#pendingUsers.has(userId)) {
@@ -193,6 +197,7 @@ export class ChatService {
       const history = trimHistory(session.history, content.length);
       const name = options.speakerName?.replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g, '').trim().slice(0, 80) || 'User';
       const input: ChatMessage[] = [...history, { role: 'user', content,
+        ...(options.media?.length ? { media: options.media } : {}),
         ...(session.mode === 'group' ? { speaker: { id: userId, name } } : {}),
       }];
       const text = await this.#generateReply(input);
@@ -259,5 +264,12 @@ function trimHistory(messages: readonly ChatMessage[], reservedCharacters = 0): 
     const removed = history.splice(0, 2);
     characters -= removed.reduce((total, message) => total + message.content.length, 0);
   }
-  return history;
+  // Keep portable references for recent follow-ups without retaining image bytes.
+  let mediaCount = 0;
+  return history.reverse().map(message => {
+    mediaCount += message.media?.length ?? 0;
+    if (!message.media?.length || mediaCount <= 12) return message;
+    const { media: _media, ...text } = message;
+    return text;
+  }).reverse();
 }
