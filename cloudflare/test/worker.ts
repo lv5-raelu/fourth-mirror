@@ -14,9 +14,14 @@ export class DiscordBot extends ProductionBot {
     if (path === '/__journal') return Response.json([...this.store.sql.exec('SELECT id, status, data FROM journal')]);
     if (path === '/__history') return Response.json(this.store.exportHistory());
     if (path === '/__beta_due') {
-      const state = this.store.getState<Record<string, unknown>>('betaAlerts');
-      if (state) this.store.setState('betaAlerts', { ...state, nextCheckAt: 0 });
+      for (const state of this.store.betaStates()) this.store.saveBetaState({ ...state, nextCheckAt: 0 });
       await this.alarm();
+      return Response.json({ ok: true });
+    }
+    if (path === '/__beta_legacy') {
+      const state = await request.json() as { guildId: string };
+      this.store.sql.exec('DELETE FROM beta_alerts WHERE guild_id = ?', state.guildId);
+      this.store.setState('betaAlerts', state);
       return Response.json({ ok: true });
     }
     return super.fetch(request);

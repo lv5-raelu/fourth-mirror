@@ -2,7 +2,7 @@
 
 A personal Discord bot with room for whatever comes next. Built with TypeScript and [discord.js](https://discord.js.org/docs/packages/discord.js/main).
 
-Includes `/ping`, `/help`, HSR beta lookups through `/beta`, and optional AI conversations through `/chat` and `/reset`. The AI model, API key, and provider endpoint are configurable. Commands are scoped to one server. The bot connects through Discord's Gateway, so you can run it locally without a public web server or an interactions endpoint.
+Includes `/ping`, `/help`, HSR beta lookups through `/beta`, and optional AI conversations through `/chat` and `/reset`. The AI model, API key, and provider endpoint are configurable. Global commands work in every server where the bot is installed, with an optional server allowlist. The bot connects through Discord's Gateway, so you can run it locally without a public web server or an interactions endpoint.
 
 For continuous hosting, follow the [Linux VM deployment guide](docs/hosting.md), including an Oracle Always Free option and its availability limits. Docker Compose keeps history on disk and restarts the bot after crashes or server reboots. The [Railway guide](docs/railway.md) remains available as an alternative; check its pricing before deploying.
 
@@ -25,7 +25,7 @@ cp .env.example .env
 2. Copy **General Information → Application ID** into `DISCORD_APPLICATION_ID` in `.env`.
 3. Open **Bot**, generate/reset the bot token, and save it as `DISCORD_TOKEN`. Keep `.env` private; it is ignored by Git.
 4. Under **Installation**, enable **Guild Install**. In its default install settings, select the `bot` and `applications.commands` scopes. For AI chat, grant **View Channel**, **Send Messages**, **Read Message History**, and **Send Messages in Threads**. Also grant **Create Private Threads** for Personal mode and **Create Public Threads** for Group mode. Copy the install link and use it to add the bot to your server. You can leave permissions empty if using only `/ping` and `/help`.
-5. In Discord, enable **User Settings → Advanced → Developer Mode**. Right-click your server, choose **Copy Server ID**, and save it as `DISCORD_GUILD_ID`.
+5. Keep `DISCORD_GUILD_IDS=*` to allow every installed server. To restrict access, enable Discord's **User Settings → Advanced → Developer Mode**, copy each permitted server ID, and put a comma-separated list in `DISCORD_GUILD_IDS`.
 
 For AI chat, open **Bot → Privileged Gateway Intents** and enable **Message Content Intent**. The bot requests `Guilds`, `GuildMessages`, and `MessageContent` when an AI key is configured. Without an AI key it requests only `Guilds`, and you can leave privileged intents disabled. Leave **Interactions Endpoint URL** empty: this bot receives interactions through its Gateway connection.
 
@@ -34,7 +34,7 @@ Your `.env` will contain:
 ```dotenv
 DISCORD_TOKEN=your-bot-token
 DISCORD_APPLICATION_ID=your-application-id
-DISCORD_GUILD_ID=your-server-id
+DISCORD_GUILD_IDS=*
 ```
 
 Existing environment variables take precedence over `.env`, so the same code also works with a host's environment settings.
@@ -49,7 +49,15 @@ npm run dev
 
 Try `/ping` and `/help` in your server. Both reply privately to the person using the command. `/help` is generated from the same registry used by the bot and deployment script.
 
-`commands:deploy` replaces this application's entire command list **in the configured server**. Removing a command from the registry and deploying removes it from Discord too. Other applications and global commands are unaffected. Registration is an explicit step; restarting the bot does not change Discord's registered commands. [Discord's command documentation](https://docs.discord.com/developers/interactions/application-commands) explains guild command registration.
+`commands:deploy` replaces this application's global command list, restricted to server installations and server channels. Removing a command from the registry and deploying removes it from Discord too. If the legacy `DISCORD_GUILD_ID` is set, sync also clears this application's old guild command list there, after publishing globally, so stale commands cannot shadow updates. Other applications are unaffected. Registration is explicit; restarting does not change Discord's registered commands. Discord clients may need to refresh their command list. See [Discord's command documentation](https://docs.discord.com/developers/interactions/application-commands).
+
+### Multiple servers
+
+With `DISCORD_GUILD_IDS=*`, inviting the bot to another server makes the same global commands and direct-mention answers available there, subject to that server's channel permissions. Use a comma-separated list to allow only selected servers. If this setting is absent, the legacy `DISCORD_GUILD_ID` keeps older installations restricted to their original server; if neither setting is present, all installed servers are allowed. Direct messages are unsupported.
+
+Each conversation retains its own thread history, and one-off context comes only from the channel where the question was asked. Beta alert channels, enable settings, checkpoints, and delivery reservations are stored per server. A member needs Manage Server in that server to configure its alerts; notification channels must belong to the same server. Existing beta settings migrate automatically and new servers start with alerts disabled.
+
+All servers share the bot owner's AI/web credentials and the existing global concurrency, per-user cooldowns, and 100-conversation retention limit. For Cloudflare, set the access policy in `cloudflare/wrangler.jsonc` under `vars.DISCORD_GUILD_IDS` and deploy; it defaults to `*`. That non-secret policy is not uploaded by `cloudflare:secrets`.
 
 `dev` restarts the bot when an imported source file changes. Restart it yourself after changing `.env`. Keep the process running while you want the bot online; for continuous use, run it on an always-on machine.
 

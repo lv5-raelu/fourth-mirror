@@ -22,9 +22,9 @@ export const beta: Command = {
       await executeBeta({ action: interaction.options.getSubcommand(), userId: interaction.user.id,
         canManage: Boolean(interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)),
         ...(question !== null ? { question } : {}), ...(channel ? { channelId: channel.id } : {}), ...(enabled !== null ? { enabled } : {}),
-      }, context.beta, context.chat, async payload => { await interaction.editReply({ ...payload, allowedMentions: { parse: [] } }); }, async id => {
+      }, context.beta.forGuild(interaction.guildId!), context.chat, async payload => { await interaction.editReply({ ...payload, allowedMentions: { parse: [] } }); }, async id => {
         const target = await interaction.client.channels.fetch(id);
-        if (!target || !('guildId' in target) || target.guildId !== context.config.guildId ||
+        if (!target || !('guildId' in target) || target.guildId !== interaction.guildId ||
           (target.type !== ChannelType.GuildText && target.type !== ChannelType.GuildAnnouncement)) throw new ChatError('Choose a regular text or announcement channel in this server.');
         if (!target.permissionsFor(interaction.client.user)?.has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks])) {
           throw new ChatError('I need View Channel, Send Messages, and Embed Links in the notification channel.');

@@ -34,8 +34,12 @@ export interface BetaAlertState {
 }
 
 export interface BetaStateStore {
-  load(): Promise<BetaAlertState | undefined>;
+  load(guildId: string): Promise<BetaAlertState | undefined>;
   save(state: BetaAlertState): Promise<void>;
+}
+
+export interface BetaStateCollection extends BetaStateStore {
+  list(): Promise<BetaAlertState[]>;
 }
 
 export interface BetaEmbed {

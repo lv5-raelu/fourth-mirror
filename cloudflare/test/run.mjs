@@ -49,6 +49,7 @@ try {
   const test = bundle(join(directory, 'worker.ts'), 'test');
   assert.ok(!readFileSync(production, 'utf8').includes('/__crash'), 'Test controls leaked into production');
   assert.ok(!readFileSync(production, 'utf8').includes('/__beta_due'), 'Beta test controls leaked into production');
+  assert.ok(!readFileSync(production, 'utf8').includes('/__beta_legacy'), 'Legacy migration test controls leaked into production');
   const bytes = modules(production).reduce((sum, module) => sum + Buffer.byteLength(module.contents), 0);
   assert.ok(bytes < 64 * 1024 * 1024);
   pass(`Production and test bundles build; production has no test controls (${(bytes / 1024).toFixed(1)} KiB)`);
@@ -101,9 +102,10 @@ try {
     await complete(id);
     return id;
   }
-  async function createChat(user = nextId(), mode = 'personal', appPermissions = permissions) {
+  async function createChat(user = nextId(), mode = 'personal', appPermissions = permissions, overrides = {}) {
     const id = await command('chat', { app_permissions: appPermissions, member: { user: { id: user, username: 'synthetic' }, permissions },
       ...(mode === 'group' ? { data: { name: 'chat', type: 1, options: [{ name: 'mode', type: 3, value: 'group' }] } } : {}),
+      ...overrides,
     });
     const saved = await history();
     const session = saved.find(value => value.ownerId === user);
@@ -331,9 +333,10 @@ try {
   await control({ mode: 'normal' });
   pass('Bundled lore auto-retrieval, local tool lookup, source links, catalogue health, and one-off privacy work without web search');
 
-  const betaCommand = (action, options = [], admin = false) => command('beta', {
+  const betaCommand = (action, options = [], admin = false, overrides = {}) => command('beta', {
     data: { name: 'beta', type: 1, options: [{ name: action, type: 1, options }] },
     member: { user: { id: nextId(), username: 'synthetic' }, permissions: admin ? String(BigInt(permissions) | 32n) : permissions },
+    ...overrides,
   });
   const betaHistoryBefore = await history();
   const modelsBeforeBeta = (await observations('model')).length;
@@ -383,6 +386,62 @@ try {
   assert.equal((await request()).betaAlerts.enabled, false);
   await control({ mode: 'normal' });
   pass('Beta commands render source-linked embeds, ground AI in comparisons without saving chats, enforce admin/channel permissions, and announce new revisions once across restarts without AI polling');
+
+  await request('/drain', 'POST');
+  await request('/__beta_legacy', 'POST', { guildId: guild, channelId: null, checkpoint: null, nextCheckAt: 0,
+    lastCheckedAt: 12345, lastAnnouncedAt: null, lastError: null, deliveryPending: false });
+  await mf.dispose(); mf = new Miniflare(options({ DISCORD_GUILD_IDS: '*' }));
+  assert.equal((await request()).betaAlerts.servers.find(server => server.guildId === guild).lastCheckedAt, 12345);
+  await request('/start', 'POST');
+  await eventually(async () => (await request()).ready && (await request()).lastAckAt > 0, 'multi-server startup');
+  assert.equal((await request()).serverAccess.mode, 'all-installed');
+  const secondGuild = '623456789012345678', secondParent = '633456789012345678';
+  const secondScope = { guild_id: secondGuild, channel_id: secondParent };
+  await control({ channel: { id: secondParent, type: 0, guild_id: secondGuild } });
+  await command('ping', secondScope);
+  assert.match((await observations('edit')).at(-1).body.content, /Pong!/);
+  const firstHistory = await history();
+  const secondChat = await createChat(nextId(), 'group', permissions, secondScope);
+  assert.equal((await observations('thread')).at(-1).guild_id, secondGuild);
+  const secondMessage = message(secondChat, '<@' + botId + '> Second-server-only context', {
+    guild_id: secondGuild, mentions: [{ id: botId }], author: { id: nextId() },
+  });
+  await emit('MESSAGE_CREATE', secondMessage); await complete(secondMessage.id);
+  const isolated = (await observations('model')).at(-1).body.messages;
+  assert.equal(isolated.length, 2);
+  assert.equal(JSON.parse(isolated.at(-1).content).message, 'Second-server-only context');
+  assert.deepEqual((await history()).filter(session => session.threadId !== secondChat.threadId), firstHistory);
+  const wrongServer = { ...secondMessage, id: nextId(), guild_id: guild, author: { id: nextId() } };
+  const callsBeforeWrongServer = (await observations('model')).length;
+  await emit('MESSAGE_CREATE', wrongServer); await complete(wrongServer.id);
+  assert.equal((await observations('model')).length, callsBeforeWrongServer);
+  const beforeSecondMention = await history();
+  const secondMention = { ...mention, ...secondScope, id: nextId(), author: { id: nextId() }, content: '<@' + botId + '> A question from server two' };
+  await emit('MESSAGE_CREATE', secondMention); await complete(secondMention.id);
+  assert.equal((await observations('history')).at(-1).path, '/channels/' + secondParent + '/messages');
+  assert.deepEqual(await history(), beforeSecondMention);
+  await command('reset', { ...secondScope, channel_id: secondChat.threadId, member: { user: { id: secondChat.ownerId }, permissions } });
+  assert.equal((await history()).find(session => session.threadId === secondChat.threadId).history.length, 0);
+  assert.deepEqual((await history()).filter(session => session.threadId !== secondChat.threadId), firstHistory);
+  pass('Multiple servers accept commands, group chat, reset, and one-off mentions while histories and channel context remain isolated');
+
+  await betaCommand('alerts', [{ name: 'channel', type: 7, value: parent }], true, secondScope);
+  assert.match((await observations('edit')).at(-1).body.content, /in this server/);
+  assert.ok(!(await request()).betaAlerts.servers.some(server => server.guildId === secondGuild));
+  await betaCommand('alerts', [{ name: 'channel', type: 7, value: secondParent }], true, secondScope);
+  await betaCommand('alerts', [{ name: 'channel', type: 7, value: parent }], true);
+  const postsBeforeTwoServers = (await observations('delivery')).length;
+  await control({ betaRevision: 102 });
+  await request('/__beta_due', 'POST');
+  await eventually(async () => (await observations('delivery')).length === postsBeforeTwoServers + 2, 'both servers receive distinct beta alerts');
+  const serverPosts = (await observations('delivery')).slice(-2);
+  assert.equal(new Set(serverPosts.map(post => post.body.nonce)).size, 2);
+  await betaCommand('alerts', [{ name: 'enabled', type: 5, value: false }], true, secondScope);
+  const serverStatus = (await request()).betaAlerts.servers;
+  assert.equal(serverStatus.find(server => server.guildId === guild).enabled, true);
+  assert.equal(serverStatus.find(server => server.guildId === secondGuild).enabled, false);
+  await betaCommand('alerts', [{ name: 'enabled', type: 5, value: false }], true);
+  pass('Legacy beta settings migrate; servers have independent alert channels, delivery IDs, and enable settings; cross-server channel selection is rejected');
 
   const connections = (await observations('connection')).length;
   assert.equal((await response('/__crash', 'POST')).status, 503);

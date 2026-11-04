@@ -2,15 +2,16 @@ import { Events, MessageFlags } from 'discord.js';
 import type { ChatInputCommandInteraction, Client } from 'discord.js';
 import type { BotContext } from '../types.ts';
 import type { PendingWork } from '../lifecycle.ts';
+import { allowsGuild } from '../config-values.ts';
 
 export async function handleCommand(
   interaction: ChatInputCommandInteraction,
   context: BotContext,
 ): Promise<void> {
   try {
-    if (interaction.guildId !== context.config.guildId) {
+    if (!allowsGuild(context.config, interaction.guildId)) {
       await interaction.reply({
-        content: 'This bot is configured for a different server.',
+        content: 'This bot is not enabled in this server.',
         flags: MessageFlags.Ephemeral,
       });
       return;

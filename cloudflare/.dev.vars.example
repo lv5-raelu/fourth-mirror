@@ -4,6 +4,7 @@ ADMIN_TOKEN=replace-with-a-random-secret-at-least-32-characters-long
 DISCORD_TOKEN=your-separate-test-bot-token
 DISCORD_APPLICATION_ID=your-test-application-id
 DISCORD_GUILD_ID=your-test-server-id
+DISCORD_GUILD_IDS=your-test-server-id
 AI_API_KEY=
 AI_MODEL=
 AI_BASE_URL=https://api.openai.com/v1
