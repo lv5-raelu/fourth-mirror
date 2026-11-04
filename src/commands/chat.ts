@@ -50,8 +50,8 @@ export const chat: Command = {
         await thread.members.add(interaction.user.id);
         await thread.send({
           content: mode === 'group'
-            ? 'Your public group chat is ready. Anyone who can view the parent channel can see and join this thread. Mention me or reply to one of my messages to ask a question. Addressed questions share one history and replies are queued in order. Only the person who started this chat can use /reset.\n\nAddressed messages are sent to the AI provider. Attachments are not supported.'
-            : 'Your chat is ready. Send a text message and I’ll reply here. Use /reset to start with fresh context.\n\nMessages are sent to the bot’s AI provider. Server moderators can access private threads. Attachments are not supported.',
+            ? 'Your public group chat is ready. Anyone who can view the parent channel can see and join this thread. Mention me or reply to one of my messages to ask a question. Addressed questions share one history and replies are queued in order. Only the person who started this chat can use /reset.\n\nAddressed messages are sent to the AI provider. Images, custom emojis, stickers, and GIFs can be sent for visual understanding.'
+            : 'Your chat is ready. Send a message or image and I’ll reply here. Use /reset to start with fresh context.\n\nMessages are sent to the bot’s AI provider. Server moderators can access private threads. Images, custom emojis, stickers, and GIFs can be sent for visual understanding.',
           allowedMentions: { parse: [] },
         });
         return thread.id;

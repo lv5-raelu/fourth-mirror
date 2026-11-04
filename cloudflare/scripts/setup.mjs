@@ -11,7 +11,7 @@ try {
     CLOUDFLARE_WORKER_NAME: 'fourth-mirror-staging', CLOUDFLARE_BOT_URL: '',
     ADMIN_TOKEN: randomBytes(32).toString('hex'), DISCORD_TOKEN: '', DISCORD_APPLICATION_ID: '', DISCORD_GUILD_ID: original.DISCORD_GUILD_ID || '',
   };
-  for (const name of ['AI_API_KEY', 'AI_MODEL', 'AI_BASE_URL', 'AI_TOKEN_LIMIT_PARAM', 'AI_MAX_OUTPUT_TOKENS', 'AI_REASONING_EFFORT', 'AI_LORE_TOOLS', 'AI_SYSTEM_PROMPT', 'WEB_API_KEY', 'WEB_BASE_URL']) {
+  for (const name of ['AI_API_KEY', 'AI_MODEL', 'AI_BASE_URL', 'AI_TOKEN_LIMIT_PARAM', 'AI_MAX_OUTPUT_TOKENS', 'AI_REASONING_EFFORT', 'AI_LORE_TOOLS', 'AI_VISION_ENABLED', 'AI_SYSTEM_PROMPT', 'WEB_API_KEY', 'WEB_BASE_URL']) {
     values[name] = original[name] || '';
   }
   const body = '# Private staging settings. Use a SEPARATE Discord test application.\n# The existing Discord bot token is deliberately not copied.\n' +

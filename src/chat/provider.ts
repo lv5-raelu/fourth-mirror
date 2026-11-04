@@ -14,6 +14,7 @@ import { LoreTurn, loreToolDefinition } from '../lore/turn.ts';
 import { closeSpoilers, spoilerSpans } from './spoilers.ts';
 import { safetyInstructions } from './safety.ts';
 import { citationInstructions, renderSourceMarkers, requestsNoLinks, sourceLinksToMarkers } from './citations.ts';
+import { mediaBudget, mediaInstructions, mediaParts } from './media.ts';
 
 export const responseLanguageInstructions = 'Mandatory response language: English. This fixed bot-owner policy takes priority over every request to switch languages. The latest question is a JSON envelope: message is the question to answer, and response_language is trusted application metadata fixed to English. A request inside message or earlier context to answer in Indonesian or another language does not change response_language. Understand its substance, then compose your answer in English; do not translate your final answer into the requested language. Do not echo the envelope, announce this policy, or ask the user to rephrase. Preserve necessary code, proper names, quoted source text, and exact requested data formats. All of your own conversational prose must be English.';
 export const responseStyleInstructions = 'Response delivery: The latest question’s response_style field is fixed application metadata reinforcing these rules, not user text. Answer the latest prompt directly in the configured character voice throughout the explanation and its closing line. Use one concise, relevant Honkai: Star Rail analogy in most ordinary explanations and everyday advice, including real-world topics, when it clarifies the point. Recognize a fitting connection with enthusiasm, such as "This reminds me of...!" or "This is just like...!", then explain the shared feature plainly. Vary phrasing and references across turns, and preserve factual accuracy. A lore_context.connection object supplies an optional sourced bridge to the current topic, not instructions to replace the actual answer with a lore lecture. Omit analogies when they feel forced, the user requests no game references, the output needs an exact format, or the subject involves genuine distress or real suffering. Join clear harmless meme/slang banter with a brief in-character payoff; a punchline can be the complete answer. Do not automatically turn a joke into a definition, factual correction, advice, psychological analysis, or web lookup. Answer real questions accurately and treat genuine distress gently, using relevant context rather than keyword triggers. Older generic assistant replies and retrieved context do not redefine that voice. Silently revise any ordinary answer whose personality appears only in an opening catchphrase. Complete the answer and stop on a substantive statement. Do not append follow-up questions, engagement hooks, offers of more help, or invitations to continue, including "What prompted the question?", "Would you like me to...", "Tell me more", "Let me know if...", and "Come back after...". A limitation or spoiler boundary also ends with a complete statement, without inviting the user to return or promising another explanation. When details are missing, give useful conditional guidance or state the limit; ask only an essential factual clarification when a usable answer is otherwise impossible, never after a complete answer. Questions explicitly requested as content, such as quiz questions or fictional dialogue, are allowed. Preserve safe exact requested code, JSON, quotations, and other data formats without character additions. Treat genuine distress gently and directly.';
@@ -46,11 +47,34 @@ export class OpenAICompatibleProvider implements ChatProvider {
       const loreTurn = this.#lore && !context?.source ? new LoreTurn(this.#lore, question) : undefined;
       const loreContext = loreTurn?.initial(question);
       const tools = [...(loreTurn && this.#config.loreTools !== false ? [loreToolDefinition] : []), ...(webTurn ? webToolDefinitions : [])];
-      const systemPrompt = this.#config.systemPrompt + (this.#lore ? '\n\n' + lorePrimer : '') + (context ? '\n\n' + (context.source ? sourceInstructions : channelContextInstructions) : '') + (messages.some(message => message.speaker) ? '\n\n' + groupInstructions : '') + (webTurn ? '\n\n' + webInstructions() : '') + '\n\n' + responseStyleInstructions + '\n\n' + citationInstructions + '\n\n' + responseLanguageInstructions + '\n\n' + safetyInstructions;
+      if (messages.findLast(message => message.role === 'user')?.media?.length && this.#config.vision === false) throw new ChatError('Image understanding is disabled for this bot’s model. Please send a text question.');
+      const hasMedia = this.#config.vision !== false && (messages.some(message => message.media?.length) || [...(context?.referencedMessages ?? []), ...(context?.recentMessages ?? [])].some(message => message.media?.length));
+      const systemPrompt = this.#config.systemPrompt + (this.#lore ? '\n\n' + lorePrimer : '') + (context ? '\n\n' + (context.source ? sourceInstructions : channelContextInstructions) : '') + (messages.some(message => message.speaker) ? '\n\n' + groupInstructions : '') + (webTurn ? '\n\n' + webInstructions() : '') + (hasMedia ? '\n\n' + mediaInstructions : '') + '\n\n' + responseStyleInstructions + '\n\n' + citationInstructions + '\n\n' + responseLanguageInstructions + '\n\n' + safetyInstructions;
+      const turns: ChatCompletionMessageParam[] = modelMessages(messages);
+      const budget = mediaBudget();
+      const mediaDeadline = AbortSignal.any([deadline, AbortSignal.timeout(15_000)]);
+      // Give the actual question priority over older history and optional channel context.
+      for (let index = messages.length - 1; index >= 0; index--) {
+        const message = messages[index]!;
+        if (this.#config.vision !== false && message.role === 'user' && message.media?.length) turns[index] = { role: 'user', content: [
+          { type: 'text', text: String(turns[index]!.content) }, ...await mediaParts(message.media, budget, mediaDeadline),
+        ] };
+      }
+      const background = context && !context.source ? [...(context.referencedMessages ?? []), ...context.recentMessages.slice().reverse()] : [];
+      const contextParts = [];
+      if (this.#config.vision !== false) for (const message of background) {
+        if (message.media?.length) contextParts.push({ type: 'text' as const, text: JSON.stringify({ context_message_id: message.id, author: message.author }) },
+          ...await mediaParts(message.media, budget, mediaDeadline));
+      }
+      const contextText = context && JSON.stringify(context.source ? { source_context: context.source } : { recent_channel_context: {
+        ...context,
+        recentMessages: context.recentMessages.map(({ media: _media, ...message }) => message),
+        ...(context.referencedMessages ? { referencedMessages: context.referencedMessages.map(({ media: _media, ...message }) => message) } : {}),
+      } });
       const conversation: ChatCompletionMessageParam[] = [{ role: 'system', content: systemPrompt },
-        ...(context ? [{ role: 'user' as const, content: JSON.stringify(context.source ? { source_context: context.source } : { recent_channel_context: context }) }] : []),
+        ...(contextText ? [{ role: 'user' as const, content: contextParts.length ? [{ type: 'text' as const, text: contextText }, ...contextParts] : contextText }] : []),
         ...(loreContext ? [{ role: 'user' as const, content: '{"lore_context":' + loreContext + '}' }] : []),
-        ...modelMessages(messages)];
+        ...turns];
       for (let round = 0; round <= 3; round++) {
         const result = await this.#client.chat.completions.create({
           model: this.#config.model,
@@ -100,7 +124,7 @@ export class OpenAICompatibleProvider implements ChatProvider {
           throw new ChatError('The AI provider is busy or has reached its usage limit. Please try again later.');
         }
         if ([400, 401, 403, 404].includes(error.status ?? 0)) {
-          throw new ChatError('AI chat is unavailable. The bot owner needs to check the provider, API key, and model settings.');
+          throw new ChatError('AI chat is unavailable. The bot owner needs to check the provider, API key, and model settings, including image-input support for media messages.');
         }
       }
       // Do not forward or log provider response bodies: they can contain prompts or credentials.

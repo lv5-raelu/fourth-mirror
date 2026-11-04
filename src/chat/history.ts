@@ -1,5 +1,6 @@
 import type { ChatSession } from './types.ts';
 import { MAX_SESSIONS, MAX_HISTORY_MESSAGES, MAX_HISTORY_CHARACTERS } from './limits.ts';
+import { MAX_MESSAGE_MEDIA, validMedia } from './media.ts';
 
 export function isStoreData(data: unknown): data is { version: 1; sessions: ChatSession[] } {
   if (typeof data !== 'object' || data === null || !('version' in data) || data.version !== 1 || !('sessions' in data)) return false;
@@ -16,6 +17,7 @@ export function isStoreData(data: unknown): data is { version: 1; sessions: Chat
       if (typeof message !== 'object' || message === null) return false;
       if (!('role' in message) || message.role !== (index % 2 === 0 ? 'user' : 'assistant')) return false;
       if (!('content' in message) || typeof message.content !== 'string' || !message.content.trim()) return false;
+      if ('media' in message && (message.role !== 'user' || !Array.isArray(message.media) || message.media.length > MAX_MESSAGE_MEDIA || !message.media.every(validMedia))) return false;
       if ('speaker' in message) {
         const speaker = message.speaker;
         if (!('mode' in session) || session.mode !== 'group' || message.role !== 'user' ||
@@ -39,6 +41,8 @@ export function parseHistory(data: unknown): { version: 1; sessions: ChatSession
   }
   return { version: 1, sessions: data.sessions.map(({ threadId, ownerId, updatedAt, history, mode }) => ({
     threadId, ownerId, updatedAt, ...(mode ? { mode } : {}),
-    history: history.map(({ role, content, speaker }) => ({ role, content, ...(speaker ? { speaker: { id: speaker.id, name: speaker.name } } : {}) })),
+    history: history.map(({ role, content, speaker, media }) => ({ role, content, ...(speaker ? { speaker: { id: speaker.id, name: speaker.name } } : {}),
+      ...(media?.length ? { media: media.map(({ url, name, kind }) => ({ url, name, kind })) } : {}),
+    })),
   })) };
 }

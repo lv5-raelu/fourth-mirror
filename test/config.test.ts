@@ -12,6 +12,14 @@ const validEnv = {
   DISCORD_GUILD_ID: '987654321098765432',
 };
 
+test('vision defaults on, can be disabled for text models, and validates its environment setting', () => {
+  const env = { ...validEnv, AI_API_KEY: 'test-key', AI_MODEL: 'test-model' };
+  assert.equal(readConfig(env).ai?.vision, undefined);
+  assert.equal(readConfig({ ...env, AI_VISION_ENABLED: 'true' }).ai?.vision, true);
+  assert.equal(readConfig({ ...env, AI_VISION_ENABLED: 'false' }).ai?.vision, false);
+  assert.throws(() => readConfig({ ...env, AI_VISION_ENABLED: 'maybe' }), /AI_VISION_ENABLED must be true or false/);
+});
+
 test('reads and trims configuration from the supplied environment', () => {
   assert.deepEqual(readConfig({
     DISCORD_TOKEN: ` ${validEnv.DISCORD_TOKEN} `,

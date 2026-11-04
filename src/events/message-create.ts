@@ -8,6 +8,7 @@ import { hasBotMention, withoutBotMention } from '../chat/group.ts';
 import { loadChannelContext } from '../chat/context.ts';
 import type { DiscordContextMessage } from '../chat/context.ts';
 import { allowsGuild } from '../config-values.ts';
+import { collectDiscordMedia } from '../chat/media.ts';
 
 export async function handleChatMessage(message: Message, context: BotContext): Promise<void> {
   const { chat, config, logger } = context;
@@ -50,12 +51,14 @@ export async function handleChatMessage(message: Message, context: BotContext): 
 
   let typing: ReturnType<typeof setInterval> | undefined;
   try {
-    if (message.attachments.size > 0 || message.stickers.size > 0) {
-      await send('This chat supports text messages. Please send your question without attachments or stickers.');
-      return;
-    }
     const prompt = group || standalone ? withoutBotMention(message.content, botId!) : message.content;
-    if (!prompt.trim()) {
+    const media = collectDiscordMedia({ content: prompt,
+      attachments: [...message.attachments.values()].map(item => ({ url: item.url, filename: item.name, size: item.size, content_type: item.contentType })),
+      sticker_items: [...message.stickers.values()].map(item => ({ id: item.id, name: item.name, format_type: item.format })),
+      embeds: message.embeds?.map(embed => embed.toJSON()) ?? [],
+    });
+    if (media.length && config.ai?.vision === false) throw new ChatError('Image understanding is disabled for this bot’s model. Please send a text question.');
+    if (!prompt.trim() && !media.length) {
       await send(standalone ? 'Add a text question after mentioning me.' : 'I couldn’t read that message. Send text; if this keeps happening, ask the bot owner to check Message Content Intent.');
       return;
     }
@@ -66,8 +69,11 @@ export async function handleChatMessage(message: Message, context: BotContext): 
     };
     const onStart = (): void => { showTyping(); typing = setInterval(showTyping, 8_000); typing.unref(); };
     if (standalone) await chat.answer(message.author.id, prompt, deliver, {
+      media,
       onStart,
       context: () => loadChannelContext(message.member?.displayName || message.author.displayName, message.channelId, message.id, {
+        ...(message.reference?.messageId && (message.reference.type ?? 0) === 0 && (message.reference.channelId ?? message.channelId) === message.channelId
+          ? { referenceId: message.reference.messageId } : {}),
         // Raw REST reads avoid populating Discord.js's message cache with fetched context.
         recent: async (limit, signal) => await message.client.rest.get(Routes.channelMessages(message.channelId),
           { query: new URLSearchParams({ before: message.id, limit: String(limit) }), signal }) as DiscordContextMessage[],
@@ -75,6 +81,7 @@ export async function handleChatMessage(message: Message, context: BotContext): 
       }),
     });
     else await chat.reply(message.channelId, message.author.id, prompt, deliver, {
+      media,
       speakerName: message.member?.displayName || message.author.displayName,
       ...(shouldRespond ? { shouldRespond } : {}),
       onStart,

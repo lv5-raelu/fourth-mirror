@@ -31,11 +31,16 @@
   "dependencies": {
     "devalue": "6.0.3",
     "discord.js": "^14.27.0",
-    "openai": "^7.45.1"
+    "lottie.js": "0.6.0",
+    "omggif": "1.0.10",
+    "openai": "^7.45.1",
+    "upng-js": "2.1.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "5.20261030.1",
     "@types/node": "^24.13.3",
+    "@types/omggif": "1.0.5",
+    "@types/upng-js": "2.1.5",
     "miniflare": "5.20261023.3-beta",
     "typescript": "~5.9.3",
     "wrangler": "4.156.0"

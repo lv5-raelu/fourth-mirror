@@ -9,6 +9,7 @@ import { ChatStore } from '../src/chat/store.ts';
 import type { ChatContext, ChatMessage, ChatProvider } from '../src/chat/types.ts';
 import { parseHistory } from '../src/chat/history.ts';
 import { unsafeReply } from '../src/chat/safety.ts';
+import { imageUrl } from './fixtures/media.ts';
 
 const owner = '123456789012345678';
 const thread = '223456789012345678';
@@ -32,6 +33,25 @@ async function fixture(t: TestContext, provider: ChatProvider) {
   const service = new ChatService(provider, store, () => now);
   return { file, store, service, advance: () => { now += 30_001; } };
 }
+
+test('media-only turns persist portable references through restart and follow-up, with no inline bytes', async t => {
+  const calls: (readonly ChatMessage[])[] = [];
+  const { service, file, advance } = await fixture(t, { reply: async input => { calls.push(input); return 'A red image.'; } });
+  const media = [{ url: imageUrl, name: 'Screenshot', kind: 'image' as const }];
+  await service.create(owner, async () => thread);
+  await service.reply(thread, owner, '', discard, { media });
+  assert.deepEqual(calls[0]?.[0]?.media, media);
+  const saved = await readFile(file, 'utf8');
+  assert.ok(saved.includes(imageUrl)); assert.doesNotMatch(saved, /data:image/);
+  advance();
+  const store = await ChatStore.open(file);
+  await new ChatService({ reply: async input => { calls.push(input); return 'Still red.'; } }, store).reply(thread, owner, 'What color was it?', discard);
+  assert.deepEqual(calls[1]?.[0]?.media, media);
+  assert.deepEqual(parseHistory(JSON.parse(saved)).sessions[0]?.history[0]?.media, media);
+  const invalid = JSON.parse(saved);
+  invalid.sessions[0].history[0].media[0].url = 'https://localhost/private.png';
+  assert.throws(() => parseHistory(invalid), /Invalid chat history/);
+});
 
 test('unsafe decoded answers never reach delivery or assistant history in personal, group, and one-off turns', async t => {
   const prohibited = String.fromCharCode(110, 105, 103, 103, 101, 114);

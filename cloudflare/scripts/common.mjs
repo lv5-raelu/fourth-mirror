@@ -13,7 +13,7 @@ export const settings = { ...process.env, ...parseEnv(await readFile(settingsPat
   throw error;
 })) };
 export const secretNames = ['ADMIN_TOKEN', 'DISCORD_TOKEN', 'DISCORD_APPLICATION_ID', 'DISCORD_GUILD_ID',
-  'AI_API_KEY', 'AI_MODEL', 'AI_BASE_URL', 'AI_TOKEN_LIMIT_PARAM', 'AI_MAX_OUTPUT_TOKENS', 'AI_REASONING_EFFORT', 'AI_LORE_TOOLS', 'AI_SYSTEM_PROMPT', 'WEB_API_KEY', 'WEB_BASE_URL'];
+  'AI_API_KEY', 'AI_MODEL', 'AI_BASE_URL', 'AI_TOKEN_LIMIT_PARAM', 'AI_MAX_OUTPUT_TOKENS', 'AI_REASONING_EFFORT', 'AI_LORE_TOOLS', 'AI_VISION_ENABLED', 'AI_SYSTEM_PROMPT', 'WEB_API_KEY', 'WEB_BASE_URL'];
 
 export async function validateDiscordSettings() {
   const config = parseConfig(settings, () => settings.AI_SYSTEM_PROMPT?.trim() || 'Bundled Fourth Mirror persona.');

@@ -35,6 +35,19 @@ export class MockDiscord extends DurableObject {
   async fetch(request) {
     const url = new URL(request.url);
     const path = url.pathname.replace(/^\/api\/v10/, '');
+    if (['cdn.discordapp.com', 'media.discordapp.net'].includes(url.hostname)) {
+      this.record('media', { path, authorization: request.headers.get('Authorization') });
+      if (path.endsWith('.json')) return Response.json({ v: '5.5.7', w: 32, h: 32, ip: 0, op: 20, fr: 10, layers: [{
+        ty: 1, ind: 1, ip: 0, op: 20, sw: 8, sh: 8, sc: '#ff0000', ks: { o: { a: 0, k: 100 }, r: { a: 0, k: 0 },
+          a: { a: 0, k: [0, 0, 0] }, s: { a: 0, k: [100, 100, 100] }, p: { a: 0, k: [8, 8, 0] } },
+      }] });
+      const fixture = path.endsWith('.gif')
+        ? 'R0lGODlhAgABAIEAAP8AAAD/AAAA/wAAACH/C05FVFNDQVBFMi4wAwEAAAAh+QQECgAAACwAAAAAAgABAAACAgQKACH5BAwKAAAALAAAAAABAAEAAAICTAEAIfkECAoAAAAsAQAAAAEAAQAAAgJUAQAh+QQECgAAACwAAAAAAQABAAACAkwBADs='
+        : path.startsWith('/stickers/')
+          ? 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACGFjVEwAAAADAAAAAM7tusAAAAAaZmNUTAAAAAAAAAABAAAAAQAAAAAAAAAAAGQD6AAAs35jzQAAAA1JREFUeJxj+M/A8B8ABQAB/4mZPR0AAAAaZmNUTAAAAAEAAAABAAAAAQAAAAAAAAAAAGQD6AAAKA2JGQAAABFmZEFUAAAAAnicY2D4z/AfAAQBAf9i5+mcAAAAGmZjVEwAAAADAAAAAQAAAAEAAAAAAAAAAABkA+gAAMWbWvAAAAARZmRBVAAAAAR4nGNgYPj/HwADAgH/DbnuYQAAAABJRU5ErkJggg=='
+          : 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==';
+      return new Response(Uint8Array.from(atob(fixture), char => char.charCodeAt(0)));
+    }
     if (url.hostname === 'hsr.gachabase.net') {
       this.record('beta-source', { path, authorization: request.headers.get('Authorization') });
       if (this.mode === 'beta-outage') return new Response('Unavailable', { status: 503 });
@@ -197,7 +210,7 @@ export class MockDiscord extends DurableObject {
 
 export default {
   fetch(request, env) {
-    if (!['discord.com', 'gateway.discord.gg', 'resume.discord.gg', 'ai.probe.invalid', 'web.probe.invalid', 'control.probe.invalid', 'hsr.gachabase.net'].includes(new URL(request.url).hostname)) {
+    if (!['discord.com', 'cdn.discordapp.com', 'media.discordapp.net', 'gateway.discord.gg', 'resume.discord.gg', 'ai.probe.invalid', 'web.probe.invalid', 'control.probe.invalid', 'hsr.gachabase.net'].includes(new URL(request.url).hostname)) {
       return new Response('External network disabled', { status: 403 });
     }
     return env.MOCK.getByName('services').fetch(request);

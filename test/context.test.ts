@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { channelContext, loadChannelContext } from '../src/chat/context.ts';
 import type { DiscordContextMessage } from '../src/chat/context.ts';
+import { imageUrl } from './fixtures/media.ts';
 
 const channelId = '333456789012345678';
 const questionId = '923456789012345678';
@@ -11,6 +12,18 @@ const message = (value: number, content = 'Message ' + value): DiscordContextMes
 });
 const reply = (value: number, target: number): DiscordContextMessage => ({ ...message(value), type: 19,
   message_reference: { message_id: id(target), channel_id: channelId },
+});
+
+test('includes media-only history and the current question’s older direct reply target', async () => {
+  const target = { ...message(1, ''), sticker_items: [{ id: '123456789012345678', name: 'Wave', format_type: 1 }] };
+  const context = await loadChannelContext('Rae', channelId, questionId, {
+    referenceId: target.id,
+    recent: async () => [{ ...message(10, ''), attachments: [{ url: imageUrl, filename: 'screen.png', size: 100 }] }],
+    message: async id => { assert.equal(id, target.id); return target; },
+  });
+  assert.equal(context.recentMessages[0]?.content, 'Media message');
+  assert.equal(context.recentMessages[0]?.media?.[0]?.url, imageUrl);
+  assert.equal(context.referencedMessages?.[0]?.media?.[0]?.name, 'Sticker: Wave');
 });
 
 test('channel context keeps recent messages in reading order with bounded text and author labels', () => {

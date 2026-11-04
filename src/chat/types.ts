@@ -2,6 +2,14 @@ export interface ChatMessage {
   readonly role: 'user' | 'assistant';
   readonly content: string;
   readonly speaker?: { readonly id: string; readonly name: string };
+  readonly media?: readonly ChatMedia[];
+}
+
+// Persist references only. Downloaded bytes and rendered frames live for one model turn.
+export interface ChatMedia {
+  readonly url: string;
+  readonly name: string;
+  readonly kind: 'image' | 'lottie' | 'preview';
 }
 
 export type ChatMode = 'personal' | 'group';
@@ -11,6 +19,7 @@ export interface ChatContextMessage {
   readonly author: string;
   readonly content: string;
   readonly replyTo?: string;
+  readonly media?: readonly ChatMedia[];
 }
 
 export interface ChatContext {
