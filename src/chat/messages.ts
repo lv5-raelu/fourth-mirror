@@ -21,7 +21,8 @@ function splitText(text: string, limit: number, preferNewlines: boolean): string
       if (lastCodeUnit >= 0xd800 && lastCodeUnit <= 0xdbff) end--;
     }
     const start = offset;
-    let nextToken = token, nextHidden = hidden;
+    let nextToken = token;
+    let nextHidden: boolean = hidden;
     while (nextToken < delimiters.length && delimiters[nextToken]! < end) { nextHidden = !nextHidden; nextToken++; }
     // Leave an opening marker with its content, rather than creating an empty |||| at a cut.
     if (end < text.length && end - start > 2 && nextHidden && delimiters[nextToken - 1] === end - 2) {
