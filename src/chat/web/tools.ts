@@ -1,6 +1,7 @@
 import type { ChatCompletionTool } from 'openai/resources/chat/completions';
 import { publicWebUrl, WebError } from './types.ts';
 import type { WebProvider } from './types.ts';
+import { spoilerSpans } from '../spoilers.ts';
 
 export const webToolDefinitions: ChatCompletionTool[] = [
   {
@@ -83,20 +84,22 @@ export class WebTurn {
     }
   }
 
-  renderCitations(answer: string): string {
+  renderCitations(answer: string, concealSources = false): string {
     let cited = false;
     const sources = [...this.#sources.values()];
+    const spans = concealSources ? spoilerSpans(answer) : [];
     // Models sometimes wrap a source marker in their own Markdown link.
     // Replace the whole citation with the registered URL, including any supplied target.
-    const rendered = answer.replace(/\[S(\d+)\](?:\([^\r\n)]*\))?/g, (_match, number: string) => {
+    const rendered = answer.replace(/\[S(\d+)\](?:\([^\r\n)]*\))?/g, (_match, number: string, position: number) => {
       const source = sources.find(value => value.id === 'S' + number);
       if (!source) return '';
       cited = true;
-      return sourceLink(source);
+      const link = sourceLink(source);
+      return concealSources && !spans.some(span => position >= span.start && position < span.end) ? '||' + link + '||' : link;
     });
     if (sources.length > 0 && !cited && !sources.some(source => rendered.includes(source.url))) {
       const references = sources.sort((a, b) => Number(b.fetched) - Number(a.fetched)).slice(0, 3);
-      return rendered + '\n\nSources: ' + references.map(sourceLink).join(' · ');
+      return rendered + '\n\nSources: ' + references.map(source => concealSources ? '||' + sourceLink(source) + '||' : sourceLink(source)).join(' · ');
     }
     if (this.#attempted && sources.length === 0) return rendered + '\n\n*No live sources were verified for this reply.*';
     return rendered;
@@ -126,7 +129,7 @@ export class WebTurn {
 }
 
 function sourceLink(source: Source): string {
-  const title = source.title.replace(/[\r\n\u0000-\u001f]/g, ' ').slice(0, 80).replace(/[\\\[\]`*_~]/g, '\\$&');
-  const url = source.url.replace(/\(/g, '%28').replace(/\)/g, '%29');
+  const title = source.title.replace(/[\r\n\u0000-\u001f]/g, ' ').slice(0, 80).replace(/[\\\[\]`*_~|]/g, '\\$&');
+  const url = source.url.replace(/\(/g, '%28').replace(/\)/g, '%29').replace(/\|/g, '%7C');
   return `[${title}](${url})`;
 }

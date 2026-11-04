@@ -7,6 +7,7 @@ import { DeepSeekWebProvider } from '../src/chat/web/deepseek.ts';
 import { WebTurn } from '../src/chat/web/tools.ts';
 import { publicWebUrl } from '../src/chat/web/types.ts';
 import type { WebProvider } from '../src/chat/web/types.ts';
+import { spoilerDelimiters, spoilerSpans } from '../src/chat/spoilers.ts';
 
 const signal = (): AbortSignal => AbortSignal.timeout(5000);
 
@@ -99,6 +100,22 @@ test('limits external calls and returned context, without offering citations for
   assert.ok(characters < 26_000);
   const answer = turn.renderCitations('Check [S3].');
   assert.ok(!answer.includes('page2'));
+});
+
+test('spoiler replies hide revealing web source titles in citations and fallback references without nesting tags', async () => {
+  const turn = new WebTurn({
+    search: async () => [{ title: 'The captain || dies', url: 'https://example.com/ending||', summary: 'A synthetic ending.', publishedAt: null }],
+    fetchPage: async () => { throw new Error('Not used'); },
+  });
+  await turn.run('web_search', '{"query":"fictional ending"}', signal());
+  for (const text of ['||The captain dies. [S1]||', '||The captain dies.|| [S1]', '||The captain dies.||']) {
+    const rendered = turn.renderCitations(text, true);
+    assert.equal(spoilerDelimiters(rendered).length % 2, 0);
+    const title = rendered.indexOf('The captain \\|\\| dies');
+    assert.ok(title > 0);
+    assert.ok(spoilerSpans(rendered).some(span => title >= span.start && title < span.end));
+    assert.ok(rendered.includes('https://example.com/ending%7C%7C'));
+  }
 });
 
 test('web failures and redirects do not expose secrets or forward credentials to another host', async t => {

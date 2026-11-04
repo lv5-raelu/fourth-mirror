@@ -1,5 +1,6 @@
 import { BETA_URL } from './source.ts';
 import type { BetaAlertState, BetaFeed, BetaMessage, BetaRevision } from './types.ts';
+import { truncateDiscordText } from '../chat/messages.ts';
 
 const color = 0xce6687;
 const clean = (value: string): string => value.replace(/[\\`*_~|\[\]<>@]/g, '').slice(0, 120);
@@ -32,8 +33,7 @@ export function latestMessage(feed: BetaFeed, notifications?: BetaRevision[]): B
 
 export function answerMessage(text: string, feed: BetaFeed): BetaMessage {
   const revision = feed.revisions[0]!;
-  let description = text.trim();
-  if (description.length > 3_800) description = description.slice(0, 3_700).replace(/[\uD800-\uDBFF]$/, '') + '\n\n*Answer shortened. Try a more specific question for the details.*';
+  const description = truncateDiscordText(text.trim(), 3_800, '\n\n*Answer shortened.*');
   return { embeds: [{ title: 'Fourth Mirror · Beta Inquiry', description, color, url: BETA_URL,
     fields: [{ name: 'Archive snapshot', value: label(revision) + (feed.stale ? '\nCached data — Gachabase could not be refreshed.' : '') }],
     footer, timestamp: new Date(feed.checkedAt).toISOString() }], components: [linkButton] };

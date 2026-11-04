@@ -7,6 +7,7 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 import { responseStyleMetadata } from '../../src/chat/group.ts';
+import { spoilerDelimiters } from '../../src/chat/spoilers.ts';
 
 const directory = dirname(fileURLToPath(import.meta.url));
 const project = resolve(directory, '../..');
@@ -332,6 +333,21 @@ try {
   assert.ok((await request()).lore.entries >= 30);
   await control({ mode: 'normal' });
   pass('Bundled lore auto-retrieval, local tool lookup, source links, catalogue health, and one-off privacy work without web search');
+
+  await control({ mode: 'story-model' });
+  const storyMention = { ...mention, id: nextId(), author: { id: nextId() }, content: '<@' + botId + '> Explain Cocolia’s ending.' };
+  await emit('MESSAGE_CREATE', storyMention); await complete(storyMention.id);
+  const storyMessages = (await observations('delivery')).filter(value => value.body.nonce.startsWith(storyMention.id));
+  assert.ok(storyMessages.length >= 2);
+  assert.ok(storyMessages.every(value => value.body.content.length <= 2_000 && spoilerDelimiters(value.body.content).length % 2 === 0));
+  assert.ok(storyMessages.every(value => !value.body.content.replace(/\|\|[\s\S]*?\|\|/g, '').includes('synthetic plot')));
+  assert.equal((await request()).lore.defaultSpoilers, 'tagged');
+  assert.deepEqual(await history(), storedBeforeMention);
+  const noSpoilersMention = { ...storyMention, id: nextId(), author: { id: nextId() }, content: '<@' + botId + '> Explain Cocolia without spoilers.' };
+  await emit('MESSAGE_CREATE', noSpoilersMention); await complete(noSpoilersMention.id);
+  assert.equal((await observations('delivery')).at(-1).body.content, 'A setting-only explanation.');
+  await control({ mode: 'normal' });
+  pass('Story answers need no opt-in, conceal revealing paragraphs and links across message splits, and still honor explicit no-spoilers questions without saving one-off content');
 
   const betaCommand = (action, options = [], admin = false, overrides = {}) => command('beta', {
     data: { name: 'beta', type: 1, options: [{ name: action, type: 1, options }] },

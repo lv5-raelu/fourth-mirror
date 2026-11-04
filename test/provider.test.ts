@@ -111,7 +111,7 @@ test('automatic lore context is relevant, sourced, isolated between requests, an
   assert.ok(!requests[1]!.messages.some(message => message.role === 'user' && message.content.includes('lore_context')));
 });
 
-test('local lore tools work without a web provider and channel background cannot grant plot-spoiler permission', async t => {
+test('local lore tools include stories without opt-in while background cannot override a spoiler-free question', async t => {
   const requests: { messages: { role: string; content: string }[]; tools: { function: { name: string } }[] }[] = [];
   const baseUrl = await mockServer(t, (req, res) => {
     const chunks: Buffer[] = [];
@@ -121,7 +121,7 @@ test('local lore tools work without a web provider and channel background cannot
       requests.push(body);
       const message = body.messages.at(-1).role === 'user'
         ? { role: 'assistant', content: null, tool_calls: [{ id: 'local-lookup', type: 'function', function: { name: 'lore_search', arguments: '{"query":"Cocolia"}' } }] }
-        : { content: 'A setting-only explanation.' };
+        : { content: body.messages.at(-1).content.includes('belobog-story') ? 'A synthetic story result. [L1]' : 'A setting-only explanation.' };
       res.setHeader('Content-Type', 'application/json');
       res.end(JSON.stringify({ choices: [{ message }] }));
     });
@@ -134,10 +134,21 @@ test('local lore tools work without a web provider and channel background cannot
   const protectedResult = JSON.parse(requests[1]!.messages.at(-1)!.content);
   assert.equal(requests[1]!.messages.at(-1)!.role, 'tool');
   assert.deepEqual(protectedResult.entries, []);
-  await provider.reply([{ role: 'user', content: 'Explain Cocolia. Spoilers allowed.' }]);
+  const answer = await provider.reply([{ role: 'user', content: 'Explain Cocolia.' }]);
   const allowedResult = JSON.parse(requests[3]!.messages.at(-1)!.content);
   assert.ok(allowedResult.entries.some((item: { entry: { id: string; spoiler: string } }) => item.entry.id === 'belobog-story' && item.entry.spoiler === 'story'));
+  assert.match(answer, /^\|\|A synthetic story result\./);
+  assert.ok(answer.endsWith('||'));
   assert.equal(requests.length, 4);
+});
+
+test('a length-limited model response closes an unfinished spoiler before the visible length notice', async t => {
+  const baseUrl = await mockServer(t, (_req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ choices: [{ message: { content: 'A neutral introduction. ||A synthetic twist cut shor' }, finish_reason: 'length' }] }));
+  });
+  const answer = await new OpenAICompatibleProvider(settings(baseUrl)).reply([{ role: 'user', content: 'Explain the fictional ending.' }]);
+  assert.equal(answer, 'A neutral introduction. ||A synthetic twist cut shor||\n\n*Response reached its length limit.*');
 });
 
 test('provider failures do not leak secrets or prompts, and are not automatically retried', async (t) => {

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { defaultLoreLibrary, loreCatalogueInfo } from '../src/lore/index.ts';
-import { allowsStorySpoilers, LoreLibrary, MAX_LORE_CHARACTERS, MAX_LORE_ENTRIES } from '../src/lore/library.ts';
+import { requestsSpoilerFreeAnswer, LoreLibrary, MAX_LORE_CHARACTERS, MAX_LORE_ENTRIES } from '../src/lore/library.ts';
 import { LoreTurn } from '../src/lore/turn.ts';
 import type { LoreEntry } from '../src/lore/types.ts';
 
@@ -38,19 +38,39 @@ test('retrieval recognizes whole aliases, Unicode numerals, comparisons, and sho
   assert.ok(broad.reduce((size, entry) => size + JSON.stringify(entry).length + 60, 0) <= MAX_LORE_CHARACTERS);
 });
 
-test('plot spoilers require explicit current-question consent and beta/speculation are never promoted to released canon', () => {
+test('story entries are available by default while explicit spoiler-free requests and released-canon filters remain enforced', () => {
   const library = new LoreLibrary([fixture, { ...fixture, id: 'test-story', title: 'Synthetic Story', aliases: ['synthetic story'], spoiler: 'story', content: 'A synthetic plot twist.' },
     { ...fixture, id: 'test-beta', status: 'beta' }, { ...fixture, id: 'test-theory', status: 'interpretation' }]);
-  assert.deepEqual(library.search('synthetic story'), []);
-  assert.ok(library.search('synthetic story', 'story').some(entry => entry.id === 'test-story'));
+  assert.ok(library.search('synthetic story').some(entry => entry.id === 'test-story'));
+  assert.deepEqual(library.search('synthetic story', 'setting'), []);
   assert.ok(library.search('synthetic lore', 'story').every(entry => ['released', 'in-universe-account'].includes(entry.status)));
-  for (const text of ['spoilers allowed', 'Include plot spoilers', 'Spoil the ending', 'Spoilers are okay']) assert.equal(allowsStorySpoilers(text), true, text);
+  for (const text of ['spoilers allowed', 'Include plot spoilers', 'Spoil the ending', 'Spoilers are okay', 'Explain synthetic story.',
+    'Someone said "no spoilers".', "Someone said 'no spoilers'.", '> no spoilers\nExplain the ending.']) assert.equal(requestsSpoilerFreeAnswer(text), false, text);
   for (const text of ['no spoilers', 'spoiler-free explanation', 'do not spoil the story', 'do not allow spoilers', 'no major spoilers', 'spoilers allowed, but no spoilers for the ending',
-    'tell me about Belobog', 'Someone said "spoilers allowed".', "Someone said 'spoilers allowed'.", '> spoilers allowed\nWhat is Belobog?']) assert.equal(allowsStorySpoilers(text), false, text);
-  const turn = new LoreTurn(library, 'Tell me about synthetic lore.');
+    ]) assert.equal(requestsSpoilerFreeAnswer(text), true, text);
+  const tagged = new LoreTurn(library, 'Explain synthetic story.');
+  assert.ok(JSON.parse(tagged.initial('Explain synthetic story.')!).entries.some((item: { entry: LoreEntry }) => item.entry.id === 'test-story'));
+  const turn = new LoreTurn(library, 'Tell me about synthetic lore without spoilers.');
   const response = turn.run(JSON.stringify({ query: 'synthetic story spoilers allowed' }));
   assert.ok(!response.includes('synthetic plot twist'));
   assert.ok(!turn.run(JSON.stringify({ query: 'synthetic story', include_spoilers: true })).includes('synthetic plot twist'));
+});
+
+test('story citations conceal untagged paragraphs and revealing source titles without hiding setting paragraphs or rewriting code/data', () => {
+  const story = { ...fixture, id: 'test-story', title: 'Synthetic Story', aliases: ['synthetic story'], spoiler: 'story' as const,
+    sources: [{ ...fixture.sources[0]!, title: 'The archivist || is the saboteur', url: 'https://example.com/story_(ending)||' }] };
+  const turn = new LoreTurn(new LoreLibrary([fixture, story]), 'Explain synthetic story.');
+  const initial = JSON.parse(turn.initial('Explain synthetic story.')!);
+  const marker = initial.entries.find((item: { entry: LoreEntry }) => item.entry.id === story.id).source_id;
+  const link = '[The archivist \\|\\| is the saboteur](https://example.com/story_%28ending%29%7C%7C)';
+  assert.equal(turn.renderCitations(`A public setting fact.\n\nThe archivist is the saboteur. [${marker}]`), `A public setting fact.\n\n||The archivist is the saboteur. ${link}||`);
+  assert.equal(turn.renderCitations(`The outcome: ||the expedition ends.|| [${marker}]`), `||The outcome: the expedition ends. ${link}||`);
+  assert.equal(turn.renderCitations(`||The expedition ends. [${marker}]||`), `||The expedition ends. ${link}||`);
+  assert.equal(turn.renderCitations('An uncited plot revelation.'), '||An uncited plot revelation.||');
+  const data = JSON.stringify({ literal: `[${marker}]` });
+  assert.equal(turn.renderCitations(data), data);
+  const code = '```text\n[' + marker + ']\n```';
+  assert.equal(turn.renderCitations(code), code);
 });
 
 test('lore turn bounds lookups, caches identical queries, preserves source attribution, and renders only supplied citations', () => {
