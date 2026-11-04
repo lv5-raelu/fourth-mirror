@@ -18,6 +18,7 @@ Attach a persistent volume to the bot service with the mount path **`/data`**. I
 DISCORD_TOKEN=your-bot-token
 DISCORD_APPLICATION_ID=your-application-id
 DISCORD_GUILD_ID=your-server-id
+DISCORD_GUILD_IDS=*
 
 AI_API_KEY=your-provider-api-key
 AI_MODEL=your-provider-model-name

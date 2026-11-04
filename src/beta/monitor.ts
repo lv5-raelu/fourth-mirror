@@ -1,5 +1,5 @@
 import { BetaClient, compareRevisions } from './source.ts';
-import type { BetaAlertState, BetaRevision, BetaStateStore } from './types.ts';
+import type { BetaAlertState, BetaFeed, BetaRevision, BetaStateStore } from './types.ts';
 
 export const BETA_POLL_MS = 10 * 60_000;
 
@@ -14,7 +14,7 @@ export class BetaMonitor {
   }
 
   async status(): Promise<BetaAlertState> {
-    const value = await this.store.load();
+    const value = await this.store.load(this.guildId);
     return value?.guildId === this.guildId ? structuredClone(value) : { guildId: this.guildId, channelId: null, checkpoint: null, nextCheckAt: 0,
       lastCheckedAt: null, lastAnnouncedAt: null, lastError: null, deliveryPending: false };
   }
@@ -42,7 +42,8 @@ export class BetaMonitor {
     });
   }
 
-  check(send: (channelId: string, revisions: BetaRevision[], checkedAt: number, nonce: string) => Promise<void>): Promise<void> {
+  check(send: (channelId: string, revisions: BetaRevision[], checkedAt: number, nonce: string) => Promise<void>,
+    readFeed: () => Promise<BetaFeed> = () => this.client.feed(true)): Promise<void> {
     return this.serial(async () => {
       const state = await this.status();
       if (!state.channelId || this.now() < state.nextCheckAt) return;
@@ -55,7 +56,7 @@ export class BetaMonitor {
       await this.store.save(state);
       let revisions: BetaRevision[];
       try {
-        const feed = await this.client.feed(true);
+        const feed = await readFeed();
         state.lastCheckedAt = feed.checkedAt;
         if (state.lastError?.startsWith('Gachabase could not be checked.')) state.lastError = null;
         revisions = feed.revisions.filter(revision => state.checkpoint && compareRevisions(revision, state.checkpoint) > 0);
@@ -71,7 +72,10 @@ export class BetaMonitor {
       state.lastError = null;
       await this.store.save(state);
       try {
-        await send(state.channelId, revisions, state.lastCheckedAt!, `beta${revisions[0]!.version.replaceAll('.', '')}${revisions[0]!.revision}`.slice(0, 25));
+        // Discord deduplicates nonces per author, so the destination must be part of the identity.
+        const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${this.guildId}:${state.channelId}:${revisions[0]!.key}`));
+        const nonce = 'b' + [...new Uint8Array(digest).slice(0, 12)].map(byte => byte.toString(16).padStart(2, '0')).join('');
+        await send(state.channelId, revisions, state.lastCheckedAt!, nonce);
         state.lastAnnouncedAt = this.now();
       } catch {
         state.lastError = 'An announcement could not be delivered. Check the selected channel and bot permissions; use /beta latest for the update.';

@@ -7,10 +7,11 @@ import type { PendingWork } from '../lifecycle.ts';
 import { hasBotMention, withoutBotMention } from '../chat/group.ts';
 import { loadChannelContext } from '../chat/context.ts';
 import type { DiscordContextMessage } from '../chat/context.ts';
+import { allowsGuild } from '../config-values.ts';
 
 export async function handleChatMessage(message: Message, context: BotContext): Promise<void> {
   const { chat, config, logger } = context;
-  if (!chat || message.guildId !== config.guildId || message.author.bot || message.webhookId || message.system) return;
+  if (!chat || !allowsGuild(config, message.guildId) || message.author.bot || message.webhookId || message.system) return;
   if (message.channel.type === ChannelType.DM || message.channel.type === ChannelType.GroupDM) return;
   const session = chat.getSession(message.channelId);
   const standalone = !session;

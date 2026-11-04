@@ -46,7 +46,9 @@ The secrets command uploads only the allowlisted Worker settings, never prints t
 
 `npm run cloudflare:control -- verify` explicitly checks the real AI and search providers with fixed synthetic inputs. It does not read conversations or post Discord messages. It uses normal provider billing and is not part of the recurring health monitor.
 
-Commands are registered for the application/server in `.env.cloudflare`. The original `commands:deploy` script still uses `.env`; use **cloudflare:commands** for the selected hosted profile. Re-register after changing command definitions, not after ordinary code changes. The existing production commands were verified and did not need re-registration during cutover.
+Commands are registered globally for the application in `.env.cloudflare`, with server-install and server-channel contexts only. If `DISCORD_GUILD_ID` is present, registration clears that application's legacy guild command list after publishing globally. The original `commands:deploy` script still uses `.env`; use **cloudflare:commands** for the selected hosted profile. Re-register after changing command definitions, not after ordinary code changes.
+
+The deployed access policy is `vars.DISCORD_GUILD_IDS` in `cloudflare/wrangler.jsonc`: `*` enables every installed server, or a comma-separated list restricts access. Redeploy after changing it; `cloudflare:secrets` does not upload this non-secret setting. Beta notification settings and checkpoints are separate for each server, and existing single-server settings migrate automatically. Chat histories stay per thread, and channel context stays in the question's channel. AI credentials and usage limits are shared across servers.
 
 Wait for `configured`, `running`, `accepting`, and `ready` to become true, `blocked` to be null, and `lastAckAt` to advance. `/status` is private and contains health/counts, not chat text or API keys. A fatal token, intent, or application-ID error blocks automatic reconnection. Fix the setting/Discord portal configuration, upload secrets if needed, then explicitly start again.
 

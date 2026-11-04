@@ -1,6 +1,7 @@
 import type { ChatSession, ChatSessionStore } from '../../src/chat/types.ts';
 import { MAX_SESSIONS } from '../../src/chat/limits.ts';
 import { parseHistory } from '../../src/chat/history.ts';
+import type { BetaAlertState } from '../../src/beta/types.ts';
 
 export interface JournalEntry {
   id: string;
@@ -21,6 +22,15 @@ export class BotStorage implements ChatSessionStore {
     this.storage = storage;
     this.sql = storage.sql;
     this.sql.exec('CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+    this.sql.exec('CREATE TABLE IF NOT EXISTS beta_alerts (guild_id TEXT PRIMARY KEY, data TEXT NOT NULL)');
+    // Migrate the old setting once, preserving its checkpoint and pending-delivery reservation.
+    storage.transactionSync(() => {
+      const previous = this.getState<BetaAlertState>('betaAlerts');
+      if (previous) {
+        this.sql.exec('INSERT OR IGNORE INTO beta_alerts VALUES (?, ?)', previous.guildId, JSON.stringify(previous));
+        this.sql.exec('DELETE FROM state WHERE key = ?', 'betaAlerts');
+      }
+    });
     this.sql.exec('CREATE TABLE IF NOT EXISTS sessions (thread_id TEXT PRIMARY KEY, data TEXT NOT NULL, updated_at REAL NOT NULL)');
     this.sql.exec('CREATE TABLE IF NOT EXISTS journal (id TEXT PRIMARY KEY, status TEXT NOT NULL, data TEXT NOT NULL, updated_at REAL NOT NULL)');
     this.sql.exec('CREATE INDEX IF NOT EXISTS journal_updated ON journal(updated_at)');
@@ -42,6 +52,19 @@ export class BotStorage implements ChatSessionStore {
 
   setState(key: string, value: unknown): void {
     this.sql.exec('INSERT INTO state VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value', key, JSON.stringify(value));
+  }
+
+  betaState(guildId: string): BetaAlertState | undefined {
+    const row = [...this.sql.exec<{ data: string }>('SELECT data FROM beta_alerts WHERE guild_id = ?', guildId)][0];
+    return row ? JSON.parse(row.data) as BetaAlertState : undefined;
+  }
+
+  betaStates(): BetaAlertState[] {
+    return [...this.sql.exec<{ data: string }>('SELECT data FROM beta_alerts')].map(row => JSON.parse(row.data) as BetaAlertState);
+  }
+
+  saveBetaState(state: BetaAlertState): void {
+    this.sql.exec('INSERT INTO beta_alerts VALUES (?, ?) ON CONFLICT(guild_id) DO UPDATE SET data=excluded.data', state.guildId, JSON.stringify(state));
   }
 
   get(threadId: string): ChatSession | undefined { return this.sessions.get(threadId); }

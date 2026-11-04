@@ -10,7 +10,8 @@ import { DeepSeekWebProvider } from './chat/web/deepseek.ts';
 import { PendingWork } from './lifecycle.ts';
 import { dirname, join } from 'node:path';
 import { BetaClient } from './beta/source.ts';
-import { BetaMonitor } from './beta/monitor.ts';
+import { ServerBeta } from './beta/servers.ts';
+import { allowsGuild } from './config-values.ts';
 import { BetaFileStore } from './beta/file-store.ts';
 import { latestMessage } from './beta/presentation.ts';
 
@@ -33,14 +34,14 @@ export async function createBot(config: Config): Promise<Bot> {
 
   const work = new PendingWork();
   const betaClient = new BetaClient();
-  const beta = { client: betaClient, monitor: new BetaMonitor(betaClient,
-    await BetaFileStore.open(join(dirname(config.ai?.historyFile ?? 'data/chats.json'), 'beta-alerts.json')), config.guildId) };
+  const beta = new ServerBeta(betaClient,
+    await BetaFileStore.open(join(dirname(config.ai?.historyFile ?? 'data/chats.json'), 'beta-alerts.json')));
   registerEvents(client, { config, commands, logger, chat, beta }, work);
   const betaTimer = setInterval(() => {
     if (!client.isReady()) return;
-    void work.run(() => beta.monitor.check(async (channelId, revisions, checkedAt, nonce) => {
+    void work.run(() => beta.check(id => allowsGuild(config, id) && client.guilds.cache.has(id), async (guildId, channelId, revisions, checkedAt, nonce) => {
       const target = await client.channels.fetch(channelId);
-      if (!target || !('guildId' in target) || target.guildId !== config.guildId ||
+      if (!target || !('guildId' in target) || target.guildId !== guildId ||
         (target.type !== 0 && target.type !== 5)) throw new Error('Invalid beta notification channel.');
       await target.send({ ...latestMessage({ checkedAt, revisions }, revisions), nonce, enforceNonce: true, allowedMentions: { parse: [] } });
     })).catch(() => logger.warn('Beta notification check could not finish.'));

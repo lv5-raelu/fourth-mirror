@@ -6,6 +6,7 @@
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,
   "preview_urls": false,
+  "vars": { "DISCORD_GUILD_IDS": "*" },
   "durable_objects": { "bindings": [{ "name": "BOT", "class_name": "DiscordBot" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["DiscordBot"] }],
   "rules": [{ "type": "Text", "globs": ["**/*.md"], "fallthrough": true }],

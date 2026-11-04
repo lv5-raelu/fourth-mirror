@@ -4,6 +4,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readConfig } from '../src/config.ts';
+import { allowsGuild } from '../src/config-values.ts';
 
 const validEnv = {
   DISCORD_TOKEN: 'test-token-never-used-for-network-requests',
@@ -20,6 +21,7 @@ test('reads and trims configuration from the supplied environment', () => {
     token: validEnv.DISCORD_TOKEN,
     applicationId: validEnv.DISCORD_APPLICATION_ID,
     guildId: validEnv.DISCORD_GUILD_ID,
+    guildIds: [validEnv.DISCORD_GUILD_ID],
     ai: null,
     web: null,
   });
@@ -30,10 +32,30 @@ test('reports all missing configuration in a single error', () => {
     assert.ok(error instanceof Error);
     assert.match(error.message, /DISCORD_TOKEN/);
     assert.match(error.message, /DISCORD_APPLICATION_ID/);
-    assert.match(error.message, /DISCORD_GUILD_ID/);
     assert.match(error.message, /\.env\.example/);
     return true;
   });
+});
+
+test('allows installed servers by default, preserves legacy restrictions, and supports an explicit server allowlist', () => {
+  const other = '223456789012345678';
+  const legacy = readConfig(validEnv);
+  assert.equal(allowsGuild(legacy, validEnv.DISCORD_GUILD_ID), true);
+  assert.equal(allowsGuild(legacy, other), false);
+  const all = readConfig({ ...validEnv, DISCORD_GUILD_IDS: '*' });
+  assert.equal(allowsGuild(all, other), true);
+  assert.equal(allowsGuild(all, null), false);
+  assert.equal(allowsGuild(all, 'not-a-server'), false);
+  const fresh = readConfig({ DISCORD_TOKEN: validEnv.DISCORD_TOKEN, DISCORD_APPLICATION_ID: validEnv.DISCORD_APPLICATION_ID });
+  assert.equal(fresh.guildIds, null);
+  assert.equal(allowsGuild(fresh, other), true);
+  const restricted = readConfig({ ...validEnv, DISCORD_GUILD_IDS: ` ${other}, ${other}, ${validEnv.DISCORD_GUILD_ID} ` });
+  assert.deepEqual(restricted.guildIds, [other, validEnv.DISCORD_GUILD_ID]);
+  assert.equal(allowsGuild(restricted, other), true);
+  assert.equal(allowsGuild(restricted, '333456789012345678'), false);
+  for (const value of ['*,123456789012345678', other + ',', '123', 'nope']) {
+    assert.throws(() => readConfig({ ...validEnv, DISCORD_GUILD_IDS: value }), /DISCORD_GUILD_IDS/);
+  }
 });
 
 test('rejects a blank token', () => {

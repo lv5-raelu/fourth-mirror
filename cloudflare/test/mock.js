@@ -18,8 +18,8 @@ export class MockDiscord extends DurableObject {
     super(ctx, env);
     this.sql = ctx.storage.sql;
     this.sql.exec('CREATE TABLE IF NOT EXISTS observations (kind TEXT, data TEXT)');
-    this.sql.exec('CREATE TABLE IF NOT EXISTS channels (id TEXT PRIMARY KEY, type INTEGER)');
-    this.sql.exec("INSERT OR IGNORE INTO channels VALUES ('333456789012345678', 0), ('223456789012345678', 12)");
+    this.sql.exec('CREATE TABLE IF NOT EXISTS channels (id TEXT PRIMARY KEY, type INTEGER, guild_id TEXT)');
+    this.sql.exec("INSERT OR IGNORE INTO channels VALUES ('333456789012345678', 0, '323456789012345678'), ('223456789012345678', 12, '323456789012345678')");
     this.mode = 'normal';
     this.ack = true;
     this.sequence = 1;
@@ -75,7 +75,7 @@ export class MockDiscord extends DurableObject {
       if ('contextTargets' in body) this.contextTargets = body.contextTargets;
       if ('betaRevision' in body) this.betaRevision = body.betaRevision;
       if ('betaEmbedLinks' in body) this.betaEmbedLinks = body.betaEmbedLinks;
-      if (body.channel) this.sql.exec('INSERT OR REPLACE INTO channels VALUES (?, ?)', body.channel.id, body.channel.type);
+      if (body.channel) this.sql.exec('INSERT OR REPLACE INTO channels VALUES (?, ?, ?)', body.channel.id, body.channel.type, body.channel.guild_id ?? '323456789012345678');
       if (body.packet) this.socket.send(JSON.stringify(body.packet));
       if (body.event) this.socket.send(JSON.stringify({ op: 0, s: this.sequence++, t: body.event.t, d: body.event.d }));
       if (body.close) this.socket.close(body.close, 'Synthetic close');
@@ -88,20 +88,21 @@ export class MockDiscord extends DurableObject {
         session_start_limit: { remaining: this.mode === 'quota' ? 0 : 1000, reset_after: 86400_000 } });
     }
     if (path === '/gateway') return Response.json({ url: 'wss://gateway.discord.gg' });
-    if (path === '/guilds/323456789012345678/roles') return Response.json([{ id: '323456789012345678', permissions: String(1024n | 2048n | (this.betaEmbedLinks ? 16384n : 0n)) }]);
-    if (/^\/guilds\/323456789012345678\/members\/\d+$/.test(path)) return Response.json({ roles: [] });
+    if (/^\/guilds\/\d+\/roles$/.test(path)) return Response.json([{ id: path.split('/')[2], permissions: String(1024n | 2048n | (this.betaEmbedLinks ? 16384n : 0n)) }]);
+    if (/^\/guilds\/\d+\/members\/\d+$/.test(path)) return Response.json({ roles: [] });
     if (/^\/channels\/\d+$/.test(path) && request.method === 'GET') {
       const id = path.split('/')[2];
-      const channel = [...this.sql.exec('SELECT type FROM channels WHERE id = ?', id)][0];
-      return channel ? Response.json({ id, type: channel.type, guild_id: '323456789012345678' }) : Response.json({}, { status: 404 });
+      const channel = [...this.sql.exec('SELECT type, guild_id FROM channels WHERE id = ?', id)][0];
+      return channel ? Response.json({ id, ...channel }) : Response.json({}, { status: 404 });
     }
     if (path.endsWith('/threads') && request.method === 'POST') {
       const body = await request.json();
       const count = [...this.sql.exec('SELECT COUNT(*) AS n FROM channels')][0].n;
       const id = String(233456789012345678n + BigInt(count));
-      this.sql.exec('INSERT INTO channels VALUES (?, ?)', id, body.type);
-      this.record('thread', { id, body });
-      return Response.json({ id, type: body.type, guild_id: '323456789012345678' });
+      const parent = [...this.sql.exec('SELECT guild_id FROM channels WHERE id = ?', path.split('/')[2])][0];
+      this.sql.exec('INSERT INTO channels VALUES (?, ?, ?)', id, body.type, parent.guild_id);
+      this.record('thread', { id, body, guild_id: parent.guild_id });
+      return Response.json({ id, type: body.type, guild_id: parent.guild_id });
     }
     if (path.includes('/thread-members/') && request.method === 'PUT') {
       this.record('member', { path });

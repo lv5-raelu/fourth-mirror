@@ -5,12 +5,12 @@ import type { BotContext } from '../types.ts';
 export function registerReady(client: Client, context: BotContext): void {
   client.once(Events.ClientReady, (readyClient) => {
     context.logger.info(`Logged in as ${readyClient.user.tag}.`, {
-      guildId: context.config.guildId,
+      servers: readyClient.guilds.cache.size,
       commands: context.commands.size,
     });
 
-    if (!readyClient.guilds.cache.has(context.config.guildId)) {
-      context.logger.warn('The configured server is unavailable. Check DISCORD_GUILD_ID and the bot invitation.');
+    if (context.config.guildIds?.some(id => !readyClient.guilds.cache.has(id))) {
+      context.logger.warn('An allowed server is unavailable. Check DISCORD_GUILD_IDS and the bot invitations.');
     }
   });
 }

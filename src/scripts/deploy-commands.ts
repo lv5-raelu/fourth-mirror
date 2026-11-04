@@ -1,10 +1,10 @@
-import { REST, Routes } from 'discord.js';
-import { commands } from '../commands/index.ts';
+import { REST } from 'discord.js';
+import { globalCommandBody, syncApplicationCommands } from '../commands/registration.ts';
 import { readConfig } from '../config.ts';
 import { logger } from '../logger.ts';
 
 async function main(): Promise<void> {
-  const body = [...commands.values()].map((command) => command.data.toJSON());
+  const body = globalCommandBody();
 
   // Preview locally without credentials or any Discord requests.
   if (process.argv.includes('--dry-run')) {
@@ -15,9 +15,9 @@ async function main(): Promise<void> {
   const config = readConfig();
   const rest = new REST({ version: '10' }).setToken(config.token);
 
-  logger.info(`Syncing ${body.length} commands to server ${config.guildId}.`);
-  await rest.put(Routes.applicationGuildCommands(config.applicationId, config.guildId), { body });
-  logger.info('Server commands synced.');
+  logger.info(`Syncing ${body.length} global commands for installed servers.`);
+  await syncApplicationCommands(rest, config);
+  logger.info('Global commands synced; legacy server commands removed if configured.');
 }
 
 main().catch((error: unknown) => {

@@ -18,7 +18,10 @@ export interface WebConfig {
 export interface Config {
   readonly token: string;
   readonly applicationId: string;
-  readonly guildId: string;
+  /** Legacy single-server setting, also used to remove old guild commands. */
+  readonly guildId?: string;
+  /** null allows every installed server; omitted preserves legacy Config callers. */
+  readonly guildIds?: readonly string[] | null;
   readonly ai: AiConfig | null;
   readonly web: WebConfig | null;
 }
@@ -30,6 +33,10 @@ export function parseConfig(env: ConfigEnvironment, loadPrompt: () => string): C
   const token = env.DISCORD_TOKEN?.trim() ?? '';
   const applicationId = env.DISCORD_APPLICATION_ID?.trim() ?? '';
   const guildId = env.DISCORD_GUILD_ID?.trim() ?? '';
+  const servers = env.DISCORD_GUILD_IDS?.trim();
+  const guildIds = servers === '*' ? null : servers
+    ? [...new Set(servers.split(',').map(value => value.trim()))]
+    : guildId ? [guildId] : null;
   const ai = readAiConfig(env, problems, loadPrompt);
   const web = readWebConfig(env, problems);
   if (web && !ai) problems.push('AI_API_KEY is required when WEB_API_KEY is set.');
@@ -38,18 +45,27 @@ export function parseConfig(env: ConfigEnvironment, loadPrompt: () => string): C
 
   for (const [name, value] of [
     ['DISCORD_APPLICATION_ID', applicationId],
-    ['DISCORD_GUILD_ID', guildId],
+    ...(guildId ? [['DISCORD_GUILD_ID', guildId]] : []),
   ]) {
     if (!value || !/^[1-9]\d{16,19}$/.test(value)) {
       problems.push(`${name} must be a Discord ID (17–20 digits).`);
     }
+  }
+  if (guildIds?.some(value => !/^[1-9]\d{16,19}$/.test(value))) {
+    problems.push('DISCORD_GUILD_IDS must be * or a comma-separated list of Discord server IDs (17–20 digits).');
   }
 
   if (problems.length > 0) {
     throw new Error(`Invalid configuration:\n${problems.join('\n')}`);
   }
 
-  return { token, applicationId, guildId, ai, web };
+  return { token, applicationId, ...(guildId ? { guildId } : {}), guildIds, ai, web };
+}
+
+export function allowsGuild(config: Pick<Config, 'guildId' | 'guildIds'>, guildId: string | null | undefined): guildId is string {
+  if (!guildId || !/^[1-9]\d{16,19}$/.test(guildId)) return false;
+  const allowed = config.guildIds === undefined ? (config.guildId ? [config.guildId] : null) : config.guildIds;
+  return allowed === null || allowed.includes(guildId);
 }
 
 function readAiConfig(env: ConfigEnvironment, problems: string[], loadPrompt: () => string): AiConfig | null {

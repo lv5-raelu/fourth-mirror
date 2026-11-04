@@ -17,10 +17,10 @@ import { missingChatThreadPermissions } from '../../src/chat/permissions.ts';
 import { CONTEXT_TIMEOUT_MS, loadChannelContext } from '../../src/chat/context.ts';
 import type { DiscordContextMessage } from '../../src/chat/context.ts';
 import { BetaClient } from '../../src/beta/source.ts';
-import { BetaMonitor } from '../../src/beta/monitor.ts';
+import { ServerBeta } from '../../src/beta/servers.ts';
+import { allowsGuild } from '../../src/config-values.ts';
 import { executeBeta } from '../../src/beta/feature.ts';
-import type { BetaFeature } from '../../src/beta/feature.ts';
-import type { BetaAlertState, BetaMessage } from '../../src/beta/types.ts';
+import type { BetaMessage } from '../../src/beta/types.ts';
 import { latestMessage } from '../../src/beta/presentation.ts';
 import { betaChannelPermissions } from '../../src/beta/permissions.ts';
 import { loreCatalogueInfo } from '../../src/lore/index.ts';
@@ -66,7 +66,7 @@ export class DiscordBot extends DurableObject<Env> {
   private readonly rest: DiscordRest;
   private readonly config: ReturnType<typeof workerConfig>;
   private readonly chat: ChatService | null;
-  private readonly beta: BetaFeature;
+  private readonly beta: ServerBeta;
   private readonly active = new Set<Promise<void>>();
   private draining: Promise<void> | null = null;
   private recovering = false;
@@ -77,10 +77,11 @@ export class DiscordBot extends DurableObject<Env> {
     this.store = new BotStorage(ctx.storage);
     this.rest = new DiscordRest(this.config.token);
     const betaClient = new BetaClient();
-    this.beta = { client: betaClient, monitor: new BetaMonitor(betaClient, {
-      load: async () => this.store.getState<BetaAlertState>('betaAlerts'),
-      save: async state => { this.store.setState('betaAlerts', state); },
-    }, this.config.guildId) };
+    this.beta = new ServerBeta(betaClient, {
+      load: async guildId => this.store.betaState(guildId),
+      save: async state => { this.store.saveBetaState(state); },
+      list: async () => this.store.betaStates(),
+    });
     this.chat = this.config.ai ? new ChatService(new OpenAICompatibleProvider(this.config.ai,
       this.config.web ? new DeepSeekWebProvider(this.config.web) : undefined), this.store) : null;
     this.gateway = new Gateway(ctx, this.store, this.rest, this.config,
@@ -108,7 +109,7 @@ export class DiscordBot extends DurableObject<Env> {
           const entry: JournalEntry = { id: interaction.id, kind: 'interaction', channelId: interaction.channel_id,
             token: interaction.token, command: interaction.data?.name ?? '', createdAt: Date.now() };
           if (this.store.claim(entry)) task = () => this.command(interaction, entry);
-        } else if (packet.t === 'MESSAGE_CREATE' && this.chat && data.guild_id === this.config.guildId &&
+        } else if (packet.t === 'MESSAGE_CREATE' && this.chat && allowsGuild(this.config, data.guild_id) &&
           data.author?.id && !data.author.bot && !data.webhook_id && [0, 19].includes(data.type ?? 0)) {
           const session = this.chat.getSession(data.channel_id);
           const candidate = data as Message;
@@ -128,10 +129,10 @@ export class DiscordBot extends DurableObject<Env> {
     if (task) this.track(task);
   }
 
-  private async chatThread(channelId: string, deadlineMs = 20_000): Promise<boolean> {
+  private async chatThread(channelId: string, deadlineMs = 20_000, guildId?: string): Promise<boolean> {
     const channel = await this.rest.request<Channel>('GET', `/channels/${channelId}`, undefined, { deadlineMs });
     const session = this.chat?.getSession(channelId);
-    return Boolean(session) && channel.guild_id === this.config.guildId &&
+    return Boolean(session) && allowsGuild(this.config, channel.guild_id) && (!guildId || channel.guild_id === guildId) &&
       (channel.type === 12 || (channel.type === 11 && session?.mode === 'group'));
   }
 
@@ -146,7 +147,7 @@ export class DiscordBot extends DurableObject<Env> {
       await this.rest.request('POST', `/interactions/${interaction.id}/${encodeURIComponent(interaction.token)}/callback`,
         { type: 5, data: { flags: 64 } }, { immediate: true, deadlineMs: 2_000, auth: false });
       deferred = true;
-      if (interaction.guild_id !== this.config.guildId) { await edit('This bot is configured for a different server.'); return; }
+      if (!allowsGuild(this.config, interaction.guild_id)) { await edit('This bot is not enabled in this server.'); return; }
       if (!this.gateway.state().accepting || this.active.size > 50) { await edit('I’m updating or busy. Please try the command again shortly.'); return; }
       const name = interaction.data?.name;
       if (name === 'ping') {
@@ -162,11 +163,11 @@ export class DiscordBot extends DurableObject<Env> {
           canManage: hasPermissions(interaction.member?.permissions, 32n),
           ...(typeof question === 'string' ? { question } : {}), ...(typeof channelId === 'string' && idPattern.test(channelId) ? { channelId } : {}),
           ...(typeof enabled === 'boolean' ? { enabled } : {}),
-        }, this.beta, this.chat, edit, id => this.validateBetaChannel(id));
+        }, this.beta.forGuild(interaction.guild_id), this.chat, edit, id => this.validateBetaChannel(id, interaction.guild_id!));
       } else if (name === 'chat' || name === 'reset') {
         if (!this.chat) { await edit('AI chat is not configured yet. Please contact the bot owner.'); return; }
         if (name === 'reset') {
-          if (!await this.chatThread(interaction.channel_id, remaining())) throw new ChatError('Use /reset inside a conversation started with /chat.');
+          if (!await this.chatThread(interaction.channel_id, remaining(), interaction.guild_id)) throw new ChatError('Use /reset inside a conversation started with /chat.');
           await this.chat.reset(interaction.channel_id, interaction.member!.user.id);
           await edit('Conversation context cleared. Your next message starts fresh. Earlier Discord messages remain visible.');
         } else await this.createChat(interaction, entry, edit, remaining);
@@ -187,15 +188,15 @@ export class DiscordBot extends DurableObject<Env> {
     }
   }
 
-  private async validateBetaChannel(channelId: string): Promise<void> {
+  private async validateBetaChannel(channelId: string, guildId: string): Promise<void> {
     const botId = this.gateway.state().botId ?? this.config.applicationId;
     const [channel, roles, member] = await Promise.all([
       this.rest.request<Channel>('GET', `/channels/${channelId}`),
-      this.rest.request<{ id: string; permissions: string }[]>('GET', `/guilds/${this.config.guildId}/roles`),
-      this.rest.request<{ roles: string[] }>('GET', `/guilds/${this.config.guildId}/members/${botId}`),
+      this.rest.request<{ id: string; permissions: string }[]>('GET', `/guilds/${guildId}/roles`),
+      this.rest.request<{ roles: string[] }>('GET', `/guilds/${guildId}/members/${botId}`),
     ]);
-    if (channel.guild_id !== this.config.guildId || ![0, 5].includes(channel.type)) throw new ChatError('Choose a regular text or announcement channel in this server.');
-    if (!betaChannelPermissions(this.config.guildId, botId, member.roles, roles, channel.permission_overwrites ?? [])) {
+    if (channel.guild_id !== guildId || ![0, 5].includes(channel.type)) throw new ChatError('Choose a regular text or announcement channel in this server.');
+    if (!betaChannelPermissions(guildId, botId, member.roles, roles, channel.permission_overwrites ?? [])) {
       throw new ChatError('I need View Channel, Send Messages, and Embed Links in the notification channel.');
     }
   }
@@ -203,7 +204,7 @@ export class DiscordBot extends DurableObject<Env> {
   private async createChat(interaction: Interaction, entry: JournalEntry, edit: (content: string) => Promise<void>, remaining: () => number): Promise<void> {
     const mode = interaction.data?.options?.find(option => option.name === 'mode')?.value === 'group' ? 'group' : 'personal';
     const channel = await this.rest.request<Channel>('GET', `/channels/${interaction.channel_id}`, undefined, { deadlineMs: remaining() });
-    if (channel.type !== 0 || channel.guild_id !== this.config.guildId) {
+    if (channel.type !== 0 || channel.guild_id !== interaction.guild_id) {
       throw new ChatError('Run /chat in a regular server text channel to start a conversation.');
     }
     // Discord supplies effective channel permissions, including overwrites, in Gateway interactions.
@@ -250,7 +251,7 @@ export class DiscordBot extends DurableObject<Env> {
     let typing: ReturnType<typeof setTimeout> | undefined;
     let shouldRespond: (() => Promise<boolean>) | undefined;
     try {
-      if (!standalone && !await this.chatThread(message.channel_id, remaining())) return;
+      if (!standalone && !await this.chatThread(message.channel_id, remaining(), message.guild_id)) return;
       if (!this.gateway.state().accepting || this.active.size > 50) {
         await send('I’m updating or busy. Please resend your message shortly.', 'p'); return;
       }
@@ -340,7 +341,9 @@ export class DiscordBot extends DurableObject<Env> {
   async alarm(): Promise<void> {
     await this.gateway.tick();
     if (this.gateway.ready) this.track(() => this.recover());
-    if (this.gateway.ready && this.gateway.state().accepting) this.track(() => this.beta.monitor.check(async (channelId, revisions, checkedAt, nonce) => {
+    if (this.gateway.ready && this.gateway.state().accepting) this.track(() => this.beta.check(id => allowsGuild(this.config, id), async (guildId, channelId, revisions, checkedAt, nonce) => {
+      const channel = await this.rest.request<Channel>('GET', `/channels/${channelId}`);
+      if (channel.guild_id !== guildId || ![0, 5].includes(channel.type)) throw new Error('Invalid beta notification channel.');
       await this.rest.richMessage(channelId, latestMessage({ checkedAt, revisions }, revisions), nonce);
     }));
     const lastPrune = this.store.getState<number>('lastPrune') ?? 0;
@@ -352,7 +355,9 @@ export class DiscordBot extends DurableObject<Env> {
 
   private health(): Record<string, unknown> {
     const state = this.gateway.state();
-    const beta = this.store.getState<BetaAlertState>('betaAlerts');
+    const servers = this.store.betaStates().filter(beta => allowsGuild(this.config, beta.guildId)).map(beta => ({
+      guildId: beta.guildId, enabled: Boolean(beta.channelId), lastCheckedAt: beta.lastCheckedAt, lastError: beta.lastError,
+    }));
     return { configured: true, running: state.running, accepting: state.accepting, ready: this.gateway.ready,
       blocked: state.blocked, lastAckAt: this.gateway.lastAckAt, heartbeatMs: this.gateway.latency,
       connections: state.connections, nextConnectAt: state.nextConnectAt,
@@ -360,7 +365,9 @@ export class DiscordBot extends DurableObject<Env> {
       active: this.active.size, sessions: this.store.sessionCount(), journal: this.store.counts(),
       lastFailure: this.store.getState('lastFailure') ?? null,
       lore: loreCatalogueInfo,
-      betaAlerts: { enabled: beta?.guildId === this.config.guildId && Boolean(beta?.channelId), lastCheckedAt: beta?.lastCheckedAt ?? null, lastError: beta?.lastError ?? null } };
+      serverAccess: { mode: this.config.guildIds === null ? 'all-installed' : 'allowlist', guildIds: this.config.guildIds ?? null },
+      betaAlerts: { enabled: servers.some(server => server.enabled), lastCheckedAt: Math.max(0, ...servers.map(server => server.lastCheckedAt ?? 0)) || null,
+        lastError: servers.find(server => server.lastError)?.lastError ?? null, servers } };
   }
 
   private async verifyProviders(): Promise<Response> {
@@ -398,7 +405,7 @@ export class DiscordBot extends DurableObject<Env> {
     }
     if (request.method !== 'POST') return new Response('Not found', { status: 404 });
     if (path === '/beta/verify') {
-      try { return Response.json({ ok: true, ...await this.beta.client.verify(), alertsEnabled: Boolean((await this.beta.monitor.status()).channelId) }); }
+      try { return Response.json({ ok: true, ...await this.beta.client.verify(), alertsEnabled: this.store.betaStates().some(state => allowsGuild(this.config, state.guildId) && Boolean(state.channelId)) }); }
       catch { return Response.json({ ok: false, error: 'Gachabase could not be read from the hosted runtime.' }, { status: 502 }); }
     }
     if (path === '/verify') return this.verifyProviders();
