@@ -78,6 +78,8 @@ Use `-- --seconds 120 --quiet-seconds 0 --interval 10` for a short monitor smoke
 
 ## Frequent updates and backup
 
+Main-branch updates are deployed automatically by [GitHub Actions](ci-cd.md), after all checks pass. The automated workflow uses the same drain and readiness sequence, with encrypted recovery artifacts. The following command remains available for a deliberate local update; avoid running it during an Actions deployment.
+
 ```sh
 npm run cloudflare:update
 ```
