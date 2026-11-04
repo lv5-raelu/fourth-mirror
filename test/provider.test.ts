@@ -3,6 +3,7 @@ import { createServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
+import { citationInstructions } from '../src/chat/citations.ts';
 import { OpenAICompatibleProvider, responseLanguageInstructions, responseStyleInstructions } from '../src/chat/provider.ts';
 import { responseStyleMetadata } from '../src/chat/group.ts';
 import { lorePrimer } from '../src/lore/primer.ts';
@@ -47,7 +48,7 @@ test('sends the configured endpoint, key, model, history, and token-limit field 
   assert.equal(received[0]?.path, '/custom/v1/chat/completions');
   assert.equal(received[0]?.auth, 'Bearer test-provider-key');
   assert.deepEqual(received[0]?.body, {
-    model: 'arbitrary-model', messages: [{ role: 'system', content: 'Answer clearly.\n\n' + lorePrimer + '\n\n' + responseStyleInstructions + '\n\n' + responseLanguageInstructions + '\n\n' + safetyInstructions }, ...history.slice(0, -1),
+    model: 'arbitrary-model', messages: [{ role: 'system', content: 'Answer clearly.\n\n' + lorePrimer + '\n\n' + responseStyleInstructions + '\n\n' + citationInstructions + '\n\n' + responseLanguageInstructions + '\n\n' + safetyInstructions }, ...history.slice(0, -1),
       { role: 'user', content: JSON.stringify({ message: 'Continue', response_style: responseStyleMetadata, response_language: 'English' }) }], max_completion_tokens: 512, tools: [loreToolDefinition],
   });
   assert.equal(received[1]?.auth, 'Bearer rotated-key');
@@ -84,7 +85,7 @@ test('one-off channel context stays in a labeled user payload before the current
   assert.deepEqual(JSON.parse(messages[1]!.content), { recent_channel_context: context });
   assert.deepEqual(JSON.parse(messages[2]!.content), { message: 'The actual question', response_style: responseStyleMetadata, response_language: 'English' });
   await provider.reply([{ role: 'user', content: 'A fresh question' }]);
-  assert.deepEqual(requests[1]!.messages, [{ role: 'system', content: 'Answer clearly.\n\n' + lorePrimer + '\n\n' + responseStyleInstructions + '\n\n' + responseLanguageInstructions + '\n\n' + safetyInstructions },
+  assert.deepEqual(requests[1]!.messages, [{ role: 'system', content: 'Answer clearly.\n\n' + lorePrimer + '\n\n' + responseStyleInstructions + '\n\n' + citationInstructions + '\n\n' + responseLanguageInstructions + '\n\n' + safetyInstructions },
     { role: 'user', content: JSON.stringify({ message: 'A fresh question', response_style: responseStyleMetadata, response_language: 'English' }) }]);
 });
 
@@ -100,7 +101,7 @@ test('automatic lore context is relevant, sourced, isolated between requests, an
     });
   });
   const provider = new OpenAICompatibleProvider(settings(baseUrl, { loreTools: false }));
-  const answer = await provider.reply([{ role: 'user', content: 'Tell me about Foxians.' }]);
+  const answer = await provider.reply([{ role: 'user', content: 'Tell me about Foxians. Cite sources.' }]);
   assert.match(answer, /honkai-star-rail\.fandom\.com\/wiki\/Foxian/);
   assert.ok(!requests[0]!.tools);
   const reference = JSON.parse(requests[0]!.messages[1]!.content).lore_context;
@@ -111,6 +112,22 @@ test('automatic lore context is relevant, sourced, isolated between requests, an
   assert.equal(requests.length, 2);
   assert.equal(requests[1]!.messages.length, 2);
   assert.ok(!requests[1]!.messages.some(message => message.role === 'user' && message.content.includes('lore_context')));
+});
+
+test('crossovers omit unnecessary lore links but keep requested sources in parentheses', async t => {
+  const profile = 'https://hsr.hoyoverse.com/en-us/character?charIndex=5&worldIndex=3';
+  const baseUrl = await mockServer(t, (_req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ choices: [{ message: { content: 'LeBron would lead the crew; Himeko repaired the Express. [Character profiles](<' + profile + '>)' } }] }));
+  });
+  const provider = new OpenAICompatibleProvider(settings(baseUrl, { loreTools: false }));
+  const question = 'lebron james replaces himeko of the astral express in honkai star rail, how would the story go?';
+  const ordinary = await provider.reply([{ role: 'user', content: question }]);
+  assert.equal(ordinary, 'LeBron would lead the crew; Himeko repaired the Express.');
+  const requested = await provider.reply([{ role: 'user', content: question + ' Include sources.' }]);
+  assert.match(requested, /\(Source: \[HoYoverse: Astral Express character profiles\]\(<https:/);
+  const optedOut = await provider.reply([{ role: 'user', content: question + ' No links please.' }]);
+  assert.equal(optedOut, ordinary);
 });
 
 test('everyday connections reach personal, group, and mention requests without tools or unrelated background triggering lore', async t => {
@@ -130,7 +147,7 @@ test('everyday connections reach personal, group, and mention requests without t
   await provider.reply([{ role: 'user', content: question }]);
   await provider.reply([{ role: 'user', content: question, speaker: { id: '123456789012345678', name: 'Rae' } }]);
   const answer = await provider.reply([{ role: 'user', content: question }], background);
-  assert.match(answer, /Stars_Spun/);
+  assert.doesNotMatch(answer, /https?:|\[L\d+\]/);
   for (const request of requests) {
     assert.ok(!request.tools);
     const context = JSON.parse(request.messages.find(message => message.content.startsWith('{"lore_context":'))!.content).lore_context;
@@ -208,13 +225,14 @@ test('dedicated source context preserves persona and English while disabling gen
     req.on('end', () => {
       received = JSON.parse(Buffer.concat(chunks).toString());
       res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ choices: [{ message: { content: 'An evidence-based answer.' } }] }));
+      res.end(JSON.stringify({ choices: [{ message: { content: 'An evidence-based answer. [Beta snapshot](https://hsr.gachabase.net/changelog/beta?lang=en)' } }] }));
     });
   });
   const web: WebProvider = { search: async () => { throw new Error('Unexpected general search'); }, fetchPage: async () => { throw new Error('Unexpected general fetch'); } };
   const source = { title: 'Synthetic beta snapshot', url: 'https://hsr.gachabase.net/changelog/beta?lang=en', checkedAt: 123, content: 'Version 9.0.51; a skill changed from 20 to 30.' };
-  await new OpenAICompatibleProvider(settings(baseUrl, { systemPrompt: 'Fourth Mirror persona.' }), web)
+  const answer = await new OpenAICompatibleProvider(settings(baseUrl, { systemPrompt: 'Fourth Mirror persona.' }), web)
     .reply([{ role: 'user', content: 'What changed?' }], { questionAuthor: 'User', recentMessages: [], source });
+  assert.equal(answer, 'An evidence-based answer. (Source: [Synthetic beta snapshot](<https://hsr.gachabase.net/changelog/beta?lang=en>))');
   assert.ok(!received.tools);
   const messages = received.messages as { role: string; content: string }[];
   assert.match(messages[0]!.content, /Fourth Mirror persona/);
@@ -295,7 +313,7 @@ test('completes search and page-reading rounds, preserves transient reasoning, a
     fetchPage: async url => { calls.push(url); return { url, title: 'Official notice', content: 'Confirmed banner details.' }; },
   };
   const answer = await new OpenAICompatibleProvider(settings(baseUrl, { reasoningEffort: 'none' }), web).reply([{ role: 'user', content: 'Check the current banner.' }]);
-  assert.match(answer, /\[Official notice\]\(https:\/\/example.com\/notice\)/);
+  assert.match(answer, /\(Source: \[Official notice\]\(<https:\/\/example.com\/notice>\)\)/);
   assert.ok(!answer.includes('[S1]'));
   assert.equal(requests.length, 3);
   assert.equal(requests[0]?.reasoning_effort, 'none');

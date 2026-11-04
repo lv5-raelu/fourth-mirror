@@ -171,6 +171,7 @@ try {
   assert.equal((await observations('search'))[0].authorization, 'Bearer synthetic-search-key');
   assert.equal((await observations('model'))[0].authorization, 'Bearer synthetic-model-key');
   assert.deepEqual((await observations('delivery')).at(-1).body.allowed_mentions, { parse: [], replied_user: false });
+  assert.equal((await observations('delivery')).at(-1).body.flags, 4);
   await emit('MESSAGE_CREATE', webMessage); await pause(100);
   assert.equal((await observations('model')).length, 2);
   pass('Only owner messages reach AI; shared persona, web search, citations, distinct credentials, mention controls, and replay suppression');
@@ -319,7 +320,7 @@ try {
   await control({ mode: 'lore-model' });
   const loreModelsBefore = (await observations('model')).length;
   const loreSearchesBefore = (await observations('search')).length;
-  const loreMention = { ...mention, id: nextId(), author: { id: nextId() }, content: '<@' + botId + '> Tell me about Foxians.' };
+  const loreMention = { ...mention, id: nextId(), author: { id: nextId() }, content: '<@' + botId + '> Tell me about Foxians. Cite sources.' };
   await emit('MESSAGE_CREATE', loreMention); await complete(loreMention.id);
   const loreCalls = (await observations('model')).slice(loreModelsBefore);
   assert.equal(loreCalls.length, 2);
@@ -328,7 +329,8 @@ try {
   assert.equal(JSON.parse(bundledLore.content).lore_context.entries[0].entry.id, 'foxians');
   const localResult = JSON.parse(loreCalls[1].body.messages.at(-1).content);
   assert.equal(localResult.entries[0].entry.id, 'vidyadhara');
-  assert.match((await observations('delivery')).at(-1).body.content, /wiki\.hoyolab\.com\/pc\/hsr\/entry\/1396/);
+  assert.match((await observations('delivery')).at(-1).body.content, /\(Source: \[.+\]\(<https:\/\/wiki\.hoyolab\.com\/pc\/hsr\/entry\/1396\?lang=en-us>\)\)/);
+  assert.equal((await observations('delivery')).at(-1).body.flags, 4);
   assert.equal((await observations('search')).length, loreSearchesBefore);
   assert.deepEqual(await history(), storedBeforeMention);
   assert.ok((await request()).lore.entries >= 120);
@@ -342,7 +344,7 @@ try {
   await emit('MESSAGE_CREATE', teaMention); await complete(teaMention.id);
   const connectedReply = (await observations('delivery')).at(-1).body.content;
   assert.match(connectedReply, /This reminds me of Immortal’s Delight/);
-  assert.match(connectedReply, /Stars_Spun/);
+  assert.doesNotMatch(connectedReply, /https?:|\[L\d+\]/);
   const teaContext = (await observations('model')).at(-1).body.messages.find(message => message.content.startsWith('{"lore_context":'));
   assert.equal(JSON.parse(teaContext.content).lore_context.connection.concept, 'milk tea');
   assert.equal((await observations('search')).length, searchesBeforeConnection);

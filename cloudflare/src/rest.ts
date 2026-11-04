@@ -79,7 +79,8 @@ export class DiscordRest {
   }
 
   async message(channelId: string, content: string, nonce: string, deadlineMs = 20_000, replyTo?: string): Promise<void> {
-    await this.request('POST', `/channels/${channelId}/messages`, { content, allowed_mentions: allowedMentions, nonce, enforce_nonce: true,
+    // SuppressEmbeds keeps conversational source links from creating large preview cards.
+    await this.request('POST', `/channels/${channelId}/messages`, { content, flags: 4, allowed_mentions: allowedMentions, nonce, enforce_nonce: true,
       ...(replyTo ? { message_reference: { message_id: replyTo, fail_if_not_exists: false } } : {}),
     }, { deadlineMs });
   }
