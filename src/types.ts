@@ -2,6 +2,7 @@ import type { ChatInputCommandInteraction, SlashCommandBuilder } from 'discord.j
 import type { Config } from './config.ts';
 import type { Logger } from './logger.ts';
 import type { ChatService } from './chat/service.ts';
+import type { BetaFeature } from './beta/feature.ts';
 
 export interface Command {
   readonly data: Pick<SlashCommandBuilder, 'name' | 'description' | 'toJSON'>;
@@ -13,4 +14,5 @@ export interface BotContext {
   readonly logger: Logger;
   readonly commands: ReadonlyMap<string, Command>;
   readonly chat: ChatService | null;
+  readonly beta?: BetaFeature;
 }

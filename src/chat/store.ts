@@ -2,10 +2,9 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import type { ChatSession } from './types.ts';
-
-export const MAX_SESSIONS = 100;
-export const MAX_HISTORY_MESSAGES = 20;
-export const MAX_HISTORY_CHARACTERS = 24_000;
+import { MAX_SESSIONS } from './limits.ts';
+import { isStoreData } from './history.ts';
+export { MAX_SESSIONS, MAX_HISTORY_MESSAGES, MAX_HISTORY_CHARACTERS } from './limits.ts';
 
 export class ChatStore {
   readonly #file: string;
@@ -63,25 +62,4 @@ export class ChatStore {
     this.#writes = write.catch(() => {});
     await write;
   }
-}
-
-function isStoreData(data: unknown): data is { version: 1; sessions: ChatSession[] } {
-  if (typeof data !== 'object' || data === null || !('version' in data) || data.version !== 1 || !('sessions' in data)) return false;
-  if (!Array.isArray(data.sessions) || data.sessions.length > MAX_SESSIONS) return false;
-  return data.sessions.every((session: unknown) => {
-    if (typeof session !== 'object' || session === null) return false;
-    if (!('threadId' in session) || typeof session.threadId !== 'string' || !/^\d{17,20}$/.test(session.threadId)) return false;
-    if (!('ownerId' in session) || typeof session.ownerId !== 'string' || !/^\d{17,20}$/.test(session.ownerId)) return false;
-    if (!('updatedAt' in session) || typeof session.updatedAt !== 'number' || !Number.isFinite(session.updatedAt)) return false;
-    if (!('history' in session) || !Array.isArray(session.history) || session.history.length > MAX_HISTORY_MESSAGES || session.history.length % 2 !== 0) return false;
-    let characters = 0;
-    const valid = session.history.every((message: unknown, index: number) => {
-      if (typeof message !== 'object' || message === null) return false;
-      if (!('role' in message) || message.role !== (index % 2 === 0 ? 'user' : 'assistant')) return false;
-      if (!('content' in message) || typeof message.content !== 'string' || !message.content.trim()) return false;
-      characters += message.content.length;
-      return true;
-    });
-    return valid && characters <= MAX_HISTORY_CHARACTERS;
-  });
 }

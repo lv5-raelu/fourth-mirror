@@ -1,6 +1,7 @@
 import { Events, MessageFlags } from 'discord.js';
 import type { ChatInputCommandInteraction, Client } from 'discord.js';
 import type { BotContext } from '../types.ts';
+import type { PendingWork } from '../lifecycle.ts';
 
 export async function handleCommand(
   interaction: ChatInputCommandInteraction,
@@ -47,9 +48,11 @@ export async function handleCommand(
   }
 }
 
-export function registerInteractionCreate(client: Client, context: BotContext): void {
+export function registerInteractionCreate(client: Client, context: BotContext, work: PendingWork): void {
   client.on(Events.InteractionCreate, (interaction) => {
     if (!interaction.isChatInputCommand()) return;
-    void handleCommand(interaction, context);
+    void work.run(() => handleCommand(interaction, context)).catch(() => {
+      context.logger.error('Unexpected failure handling a command.');
+    });
   });
 }
