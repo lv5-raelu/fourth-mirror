@@ -164,6 +164,13 @@ export class MockDiscord extends DurableObject {
           ? { role: 'assistant', content: null, tool_calls: [{ id: 'local-lore', type: 'function', function: { name: 'lore_search', arguments: '{"query":"Vidyadhara"}' } }] }
           : { role: 'assistant', content: 'Verified synthetic lore [' + source + '].' }, finish_reason: 'stop' }] });
       }
+      if (this.mode === 'story-model') {
+        const context = body.messages.find(message => message.role === 'user' && message.content.startsWith('{"lore_context":'));
+        const entries = context ? JSON.parse(context.content).lore_context.entries : [];
+        const source = entries.find(item => item.entry.spoiler === 'story')?.source_id;
+        const content = source ? 'An ordinary setting fact.\n\n' + 'A synthetic plot revelation. '.repeat(100) + '[' + source + '].' : 'A setting-only explanation.';
+        return Response.json({ choices: [{ message: { role: 'assistant', content }, finish_reason: 'stop' }] });
+      }
       const message = last.role === 'user' && last.content.includes('search')
         ? { role: 'assistant', content: null, tool_calls: [{ id: 'lookup-1', type: 'function', function: { name: 'web_search', arguments: '{"query":"synthetic documentation"}' } }] }
         : { role: 'assistant', content: last.role === 'tool' ? 'Verified synthetic evidence [S1].' : 'A synthetic reply.' };

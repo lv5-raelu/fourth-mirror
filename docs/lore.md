@@ -7,7 +7,7 @@ Examples:
 - `@Fourth Mirror How do Foxians and Vidyadhara differ? No spoilers.`
 - `@Fourth Mirror What is daily life like on the Luofu?`
 - `@Fourth Mirror Is Belobog a planet?`
-- `@Fourth Mirror Explain Cocolia's ending. Spoilers allowed.`
+- `@Fourth Mirror Explain Cocolia's ending.`
 
 ## Included material
 
@@ -28,9 +28,13 @@ The code and catalogue belong to this project. Changing `AI_API_KEY`, `AI_BASE_U
 
 ## Spoilers and attribution
 
-The default is setting and culture only. Plot entries require an explicit allowance in the latest question, such as `spoilers allowed`, `include plot spoilers`, or `spoil the ending`. A request for no spoilers takes precedence. Permission in earlier turns, other people's channel messages, quoted text, or a tool-generated query does not enable plot entries. Permission applies to that question only; there is no persistent opt-in or per-user spoiler profile.
+Story entries are available by default; no `spoilers allowed` phrase or permission exchange is needed. The bot answers directly and hides plot revelations in Discord `||spoiler tags||`. Character deaths, hidden identities or allegiances, betrayals, secret explanations, mission outcomes, and endings count as spoilers regardless of the age of their release. Normal setting, lifeforms, culture, and introductory premises stay visible. A neutral arc/version label may introduce tagged material, while revealing headings, summaries, and source links belong inside the tags. This applies to personal chats, groups, direct mentions, remembered story knowledge, and web-based answers.
 
-The retrieval filter enforces what the library supplies. Prompt instructions also tell the model not to bypass the policy using remembered knowledge or web results. As with personality and language rules, model compliance is not a guarantee; setting-only entries and explicit model-response checks should remain part of release review.
+An explicit `no spoilers` request in the latest question still filters story entries out and tells the model to omit revelations instead of hiding them in tags. Quoted text, other people's messages, and tool queries cannot override that request. Requests to stay within a stated story-progress boundary should also be honored. There is no persistent per-user spoiler profile.
+
+The model classifies its prose and chooses spoiler spans, reinforced by fixed response-style metadata on every question. As a conservative fallback, a paragraph citing a story-labeled library entry is concealed if its citation is outside an existing spoiler span; source titles and URLs stay within the same hidden paragraph. If story-labeled material was supplied but neither tags nor usable story citations identify the relevant passage, the prose answer is concealed in full. This can hide some harmless context along with the revelation. Web citation titles and fallback source lists are also hidden when a reply contains spoilers. The message splitter closes and reopens spans across Discord's 2,000-character boundary, and truncation closes a span before a visible length notice. Fenced code blocks do not conceal spoilers in Discord, so story explanations must not use them. Requested JSON keeps valid syntax with tags inside spoiler-bearing strings; literal code/citation data is preserved.
+
+These formatting safeguards do not independently classify model knowledge that has no story-labeled library reference, or the contents of literal code/JSON. As with personality and language rules, model compliance is not a guarantee; release review should include actual generated answers as well as retrieval and formatting tests. No separate classifier or paid rewriting pass is added. See [Discord's spoiler-tag documentation](https://support.discord.com/hc/en-us/articles/360022320632-Spoiler-Tags).
 
 Entries labeled `in-universe-account` describe an author's account, including possible bias. `interpretation` and `beta` entries are excluded from released-lore retrieval. Existing `/beta ask` remains grounded in its fetched changelog: it receives the vocabulary primer, but no lore entries, lore tools, or general web tools that could substitute remembered balance information for source data.
 
@@ -55,4 +59,4 @@ Add specific aliases such as `Synesthesia Beacon` rather than generic words such
 
 For changes, run `node --test test/lore.test.ts test/provider.test.ts`, then use the normal deployment checks. On the hosted bot, `npm run cloudflare:update` runs the full suite, drains active work, backs up history privately, deploys, and restores Gateway readiness. The authenticated status endpoint reports the bundled catalogue count and latest review date. Updating the lore does not require re-registering Discord commands or resetting chat history.
 
-Live response review should include a culture comparison, a location distinction, a fictional unknown entity, default spoiler protection, explicitly allowed spoilers, casual terminology, English despite language-switch requests, and exact-format output. The library improves grounding; it cannot make the model infallible.
+Live response review should include a culture comparison, a location distinction, a fictional unknown entity, an ending question without opt-in, an explicit no-spoilers question, revealing source titles, casual terminology, English despite language-switch requests, and exact-format output. The library improves grounding; it cannot make the model infallible.

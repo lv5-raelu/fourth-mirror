@@ -2,6 +2,7 @@ import { MAX_HISTORY_CHARACTERS, MAX_HISTORY_MESSAGES } from './limits.ts';
 import { ChatError } from './types.ts';
 import { CONTEXT_TIMEOUT_MS } from './context.ts';
 import type { ChatContext, ChatMessage, ChatMode, ChatProvider, ChatSession, ChatSessionStore, SourceContext } from './types.ts';
+import { truncateDiscordText } from './messages.ts';
 
 const MAX_PROMPT_CHARACTERS = 4_000;
 const MAX_REPLY_CHARACTERS = 16_000;
@@ -245,12 +246,7 @@ function restarting(): ChatError {
 }
 
 function truncateReply(answer: string): string {
-  if (answer.length <= MAX_REPLY_CHARACTERS) return answer;
-  const suffix = '\n\n*Reply shortened. Ask me to continue if needed.*';
-  let end = MAX_REPLY_CHARACTERS - suffix.length;
-  const lastCodeUnit = answer.charCodeAt(end - 1);
-  if (lastCodeUnit >= 0xd800 && lastCodeUnit <= 0xdbff) end--;
-  return answer.slice(0, end) + suffix;
+  return truncateDiscordText(answer, MAX_REPLY_CHARACTERS, '\n\n*Reply shortened.*');
 }
 
 function trimHistory(messages: readonly ChatMessage[], reservedCharacters = 0): ChatMessage[] {

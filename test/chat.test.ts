@@ -138,6 +138,17 @@ test('oversized model output stays within the delivery limit without splitting a
   assert.equal((await ChatStore.open(file)).get(thread)?.history.at(-1)?.content, delivered);
 });
 
+test('reply truncation closes a story spoiler before its length notice and persists the delivered form', async t => {
+  const { service, file } = await fixture(t, { reply: async () => 'An introduction. ||' + 'secret🙂'.repeat(3_000) + '||' });
+  await service.create(owner, async () => thread);
+  let delivered = '';
+  await service.reply(thread, owner, 'Explain the ending', async text => { delivered = text; });
+  assert.ok(delivered.length <= 16_000);
+  assert.ok(delivered.endsWith('||\n\n*Reply shortened.*'));
+  assert.ok(!/[\uD800-\uDFFF]/u.test(delivered));
+  assert.equal((await ChatStore.open(file)).get(thread)?.history.at(-1)?.content, delivered);
+});
+
 test('limits concurrent provider calls across users and prevents duplicate thread creation', async (t) => {
   const pending = deferred();
   const { service } = await fixture(t, { reply: () => pending.promise });

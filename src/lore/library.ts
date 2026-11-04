@@ -15,12 +15,11 @@ function normalize(value: string): string {
 }
 function contains(text: string, phrase: string): boolean { return (' ' + text + ' ').includes(' ' + phrase + ' '); }
 
-/** Permission comes from the current question only, never history or a tool-generated query. */
-export function allowsStorySpoilers(question: string): boolean {
+/** Honor an explicit spoiler-free request in the current question, not quoted/background text. */
+export function requestsSpoilerFreeAnswer(question: string): boolean {
   const direct = question.replace(/```[\s\S]*?```/g, ' ').replace(/^\s*>.*$/gm, ' ').replace(/"(?:\\.|[^"\\])*"|“[^”]*”|‘[^’]*’|(?<![\p{L}\p{N}])'[^'\r\n]*'(?![\p{L}\p{N}])/gu, ' ');
   const text = normalize(direct).slice(0, 4_000);
-  if (/\b(?:no (?:plot |story |major |ending )?spoilers?|spoiler free|without (?:any )?spoilers?|avoid (?:plot |story )?spoilers?|don t spoil|do not spoil|(?:don t|do not|never) (?:include|allow|give|show|reveal) (?:any |plot |story )*spoilers?)\b/.test(text)) return false;
-  return /\b(?:spoilers? (?:are )?(?:ok|okay|allowed|fine|welcome)|(?:include|allow) (?:the |all )?(?:plot |story )?spoilers?|spoil (?:it|everything|the story|the ending|the plot))\b/.test(text);
+  return /\b(?:no (?:plot |story |major |ending )?spoilers?|spoiler free|without (?:any )?spoilers?|avoid (?:plot |story )?spoilers?|don t spoil|do not spoil|(?:don t|do not|never) (?:include|allow|give|show|reveal) (?:any |plot |story )*spoilers?)\b/.test(text);
 }
 
 export class LoreLibrary {
@@ -46,7 +45,7 @@ export class LoreLibrary {
     }));
   }
 
-  search(query: string, spoiler: LoreSpoiler = 'setting', scope: 'automatic' | 'catalogue' = 'automatic'): readonly LoreEntry[] {
+  search(query: string, spoiler: LoreSpoiler = 'story', scope: 'automatic' | 'catalogue' = 'automatic'): readonly LoreEntry[] {
     if (!query.trim() || query.length > 500) return [];
     const text = normalize(query);
     const explicit = /\b(?:hsr|honkai star rail|star rail)\b/.test(text);
