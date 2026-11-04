@@ -331,9 +331,23 @@ try {
   assert.match((await observations('delivery')).at(-1).body.content, /wiki\.hoyolab\.com\/pc\/hsr\/entry\/1396/);
   assert.equal((await observations('search')).length, loreSearchesBefore);
   assert.deepEqual(await history(), storedBeforeMention);
-  assert.ok((await request()).lore.entries >= 30);
+  assert.ok((await request()).lore.entries >= 120);
+  assert.ok((await request()).lore.connections >= 18);
   await control({ mode: 'normal' });
   pass('Bundled lore auto-retrieval, local tool lookup, source links, catalogue health, and one-off privacy work without web search');
+
+  await control({ mode: 'connection-model' });
+  const searchesBeforeConnection = (await observations('search')).length;
+  const teaMention = { ...mention, id: nextId(), author: { id: nextId() }, content: '<@' + botId + '> I bought milk tea after work.' };
+  await emit('MESSAGE_CREATE', teaMention); await complete(teaMention.id);
+  const connectedReply = (await observations('delivery')).at(-1).body.content;
+  assert.match(connectedReply, /This reminds me of Immortal’s Delight/);
+  assert.match(connectedReply, /Stars_Spun/);
+  const teaContext = (await observations('model')).at(-1).body.messages.find(message => message.content.startsWith('{"lore_context":'));
+  assert.equal(JSON.parse(teaContext.content).lore_context.connection.concept, 'milk tea');
+  assert.equal((await observations('search')).length, searchesBeforeConnection);
+  assert.deepEqual(await history(), storedBeforeMention);
+  pass('Everyday concepts receive a bounded, sourced lore connection in Workers without web search or one-off history storage');
 
   await control({ mode: 'story-model' });
   const storyMention = { ...mention, id: nextId(), author: { id: nextId() }, content: '<@' + botId + '> Explain Cocolia’s ending.' };

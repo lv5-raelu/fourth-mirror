@@ -5,7 +5,7 @@ import { hideSpoilerText, spoilerSpans } from '../chat/spoilers.ts';
 
 export const loreToolDefinition: ChatCompletionTool = { type: 'function', function: {
   name: 'lore_search',
-  description: 'Search the curated English Honkai: Star Rail library for setting, lifeforms, places, factions, culture, and history. Free local lookup; use for established lore before web search when relevant context is missing. Coverage is foundational, not exhaustive or live. Story entries are available by default: hide plot revelations with Discord spoiler tags. An explicit spoiler-free question filters them out.',
+  description: 'Search the curated English Honkai: Star Rail library for worlds, cultures, food, lifeforms, political institutions, characters, technology, and history. Free local lookup; use for established lore and relevant concept connections before web search when context is missing. Coverage is selected, not exhaustive or live. Story entries are available by default: hide plot revelations with Discord spoiler tags. An explicit spoiler-free question filters them out.',
   parameters: { type: 'object', properties: { query: { type: 'string', maxLength: 240 } }, required: ['query'], additionalProperties: false },
 } };
 
@@ -21,7 +21,9 @@ export class LoreTurn {
 
   initial(question: string): string | undefined {
     const entries = this.#library.search(question.slice(0, 500), this.#story ? 'story' : 'setting');
-    return entries.length || /\b(?:hsr|honkai\s*:?\s*star\s+rail|star\s+rail)\b/i.test(question) ? this.#encode(entries) : undefined;
+    if (entries.length || /\b(?:hsr|honkai\s*:?\s*star\s+rail|star\s+rail)\b/i.test(question)) return this.#encode(entries);
+    const connection = this.#library.connection(question);
+    return connection ? this.#encode(connection.entries, { concept: connection.concept, comparison: connection.comparison }) : undefined;
   }
 
   run(argumentsJson: string): string {
@@ -42,7 +44,7 @@ export class LoreTurn {
     } catch { return JSON.stringify({ error: 'Invalid lore query JSON.' }); }
   }
 
-  #encode(entries: readonly LoreEntry[]): string {
+  #encode(entries: readonly LoreEntry[], connection?: { concept: string; comparison: string }): string {
     const selected: { source_id: string; entry: LoreEntry }[] = [];
     for (const entry of entries) {
       if (this.#characters + JSON.stringify(entry).length + 60 > MAX_LORE_CHARACTERS * 2) break;
@@ -51,9 +53,10 @@ export class LoreTurn {
       selected.push({ source_id: source.marker, entry });
       this.#characters += JSON.stringify(entry).length + 60;
     }
-    return JSON.stringify({ coverage: 'Curated foundational released lore; not an exhaustive or current-patch database. Release labels identify the material summarized. Review dates do not mean live verification.',
+    return JSON.stringify({ coverage: 'Curated released lore; not an exhaustive or current-patch database. Release labels identify the material summarized. Review dates do not mean live verification.',
       spoiler_policy: this.#story ? 'Answer normally. Hide every plot revelation, including revealing source links, inside Discord ||spoiler tags||. No opt-in phrase is needed. Keep ordinary setting/culture visible.' : 'The current question explicitly requests a spoiler-free answer. Setting and culture only; omit plot revelations instead of putting them behind tags.',
       entries: selected,
+      ...(connection ? { connection } : {}),
     });
   }
 
@@ -80,12 +83,11 @@ export class LoreTurn {
   #hideStoryParagraphs(answer: string): string {
     const spans = spoilerSpans(answer);
     const ranges: { start: number; end: number }[] = [];
-    // A story citation is a reliable classification signal. Conservatively conceal its whole
-    // paragraph if the model left the citation outside a spoiler; never rewrite literal code.
+    // A story citation classifies its whole paragraph, even if only the citation or last clause
+    // was tagged. Otherwise an analogy can reveal the same twist outside that small span.
     const tokens = /```[\s\S]*?(?:```|$)|`[^`\r\n]*`|\\[\s\S]|\[L(\d+)\](?:\([^\r\n)]*\))?/g;
     for (const match of answer.matchAll(tokens)) {
-      if (!match[1] || ![...this.#sources.values()].some(source => source.marker === 'L' + match[1] && source.entry.spoiler === 'story') ||
-        spans.some(span => match.index >= span.start && match.index < span.end)) continue;
+      if (!match[1] || ![...this.#sources.values()].some(source => source.marker === 'L' + match[1] && source.entry.spoiler === 'story')) continue;
       let start = answer.lastIndexOf('\n\n', match.index);
       start = start === -1 ? 0 : start + 2;
       let end = answer.indexOf('\n\n', match.index);

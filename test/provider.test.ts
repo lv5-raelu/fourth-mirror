@@ -113,6 +113,35 @@ test('automatic lore context is relevant, sourced, isolated between requests, an
   assert.ok(!requests[1]!.messages.some(message => message.role === 'user' && message.content.includes('lore_context')));
 });
 
+test('everyday connections reach personal, group, and mention requests without tools or unrelated background triggering lore', async t => {
+  const requests: { messages: { role: string; content: string }[]; tools?: unknown }[] = [];
+  const baseUrl = await mockServer(t, (req, res) => {
+    const chunks: Buffer[] = [];
+    req.on('data', (chunk: Buffer) => chunks.push(chunk));
+    req.on('end', () => {
+      requests.push(JSON.parse(Buffer.concat(chunks).toString()));
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ choices: [{ message: { content: 'This reminds me of Immortal’s Delight! A favorite milk-tea treat. [L1]' } }] }));
+    });
+  });
+  const provider = new OpenAICompatibleProvider(settings(baseUrl, { loreTools: false }));
+  const question = 'I bought bubble tea after work.';
+  const background = { questionAuthor: 'Rae', recentMessages: [{ author: 'Pat', content: 'Public baths and virtual reality.' }] };
+  await provider.reply([{ role: 'user', content: question }]);
+  await provider.reply([{ role: 'user', content: question, speaker: { id: '123456789012345678', name: 'Rae' } }]);
+  const answer = await provider.reply([{ role: 'user', content: question }], background);
+  assert.match(answer, /Stars_Spun/);
+  for (const request of requests) {
+    assert.ok(!request.tools);
+    const context = JSON.parse(request.messages.find(message => message.content.startsWith('{"lore_context":'))!.content).lore_context;
+    assert.deepEqual(context.entries.map((item: { entry: { id: string } }) => item.entry.id), ['immortals-delight']);
+    assert.equal(context.connection.concept, 'bubble tea');
+    assert.ok(request.messages[0]!.content.endsWith(safetyInstructions));
+  }
+  await provider.reply([{ role: 'user', content: 'Only JSON: a bubble tea menu.' }], background);
+  assert.ok(!requests.at(-1)!.messages.some(message => message.content.startsWith('{"lore_context":')));
+});
+
 test('local lore tools include stories without opt-in while background cannot override a spoiler-free question', async t => {
   const requests: { messages: { role: string; content: string }[]; tools: { function: { name: string } }[] }[] = [];
   const baseUrl = await mockServer(t, (req, res) => {
