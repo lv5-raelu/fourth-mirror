@@ -70,7 +70,8 @@ test('renders indexed tooltip percentages without inventing missing values', () 
 
 test('compiles readable before/after changes, kits, traces, eidolons, Light Cones, and set bonuses', () => {
   const parsed = parseDetails(diff());
-  assert.match(parsed.sections[0]!.entries[0]!.value, /Before: Deals 50% DMG[\s\S]*After: Deals 75% DMG/);
+  assert.match(parsed.sections[0]!.entries[0]!.value, /Deals 50% DMG[\s\S]*↓[\s\S]*Deals 75% DMG/);
+  assert.deepEqual(parsed.sections[0]!.entries[0]!.comparison, { before: 'Deals 50% DMG.', after: 'Deals 75% DMG.' });
   assert.deepEqual(parsed.sections.map(section => section.id), ['changes', 'kit', 'traces', 'eidolons', 'values']);
   assert.ok(!JSON.stringify(parsed.sections).includes('portrait'));
   const added = parseDetails(page({ dto: { ...dto(0.5),
@@ -87,7 +88,7 @@ test('compiles readable before/after changes, kits, traces, eidolons, Light Cone
 test('overviews contain real changes and every entity remains reachable across menu pages', async () => {
   const { client, reads } = fixture(43);
   let message = await overviewMessage(client, await client.feed());
-  assert.match(JSON.stringify(message.embeds), /Before: Deals 50%.*After: Deals 75%/s);
+  assert.match(JSON.stringify(message.embeds), /Deals 50%.*↓.*Deals 75%/s);
   const values: string[] = [];
   for (let index = 0; index < 3; index++) {
     assertLimits(message);
@@ -213,6 +214,24 @@ test('Node opens shared controls privately and updates private pagination in pla
     await handleBetaComponent(result.interaction as unknown as MessageComponentInteraction, context(client));
     assert.equal(result.calls[0]!.kind, privateView ? 'deferUpdate' : 'deferReply');
     assert.ok(!result.calls.some(call => call.kind === 'send'));
-    assert.match(JSON.stringify(result.calls.at(-1)), /Before: Deals 50%/);
+    assert.match(JSON.stringify(result.calls.at(-1)), /Deals 50%.*↓.*Deals 75%/s);
   }
+});
+
+test('Node uploads rendered comparison pages and clears images when switching to selectable text', async () => {
+  const { client } = fixture();
+  const message = latestMessage(await client.feed());
+  const result = nodeInteraction(message, viewId({ revision: 'beta_9.0.51_100', entity: 0, section: 'changes', page: 0 }));
+  result.interaction.appPermissions = new PermissionsBitField(1024n | 2048n | 16384n | 32768n);
+  await handleBetaComponent(result.interaction as unknown as MessageComponentInteraction, context(client));
+  const payload = result.calls.at(-1)!.payload as BetaMessage & { files: { name: string; attachment: Buffer }[]; attachments: unknown[] };
+  assert.equal(payload.embeds[0]!.image?.url, 'attachment://beta-diff.png');
+  assert.equal(payload.files[0]!.name, 'beta-diff.png');
+  assert.deepEqual([...payload.files[0]!.attachment.slice(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
+  const plain = nodeInteraction(message, viewId({ revision: 'beta_9.0.51_100', entity: 0, section: 'text', page: 0 }));
+  await handleBetaComponent(plain.interaction as unknown as MessageComponentInteraction, context(client));
+  const text = plain.calls.at(-1)!.payload as { attachments: unknown[]; files: unknown[]; embeds: BetaMessage['embeds'] };
+  assert.deepEqual(text.attachments, []); assert.deepEqual(text.files, []);
+  assert.equal(text.embeds[0]!.image, undefined);
+  assert.match(text.embeds[0]!.fields![0]!.value, /50%[\s\S]*↓[\s\S]*75%/);
 });

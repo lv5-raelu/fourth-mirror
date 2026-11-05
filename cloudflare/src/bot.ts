@@ -22,7 +22,8 @@ import { ServerBeta } from '../../src/beta/servers.ts';
 import { allowsGuild } from '../../src/config-values.ts';
 import { executeBeta } from '../../src/beta/feature.ts';
 import type { BetaMessage } from '../../src/beta/types.ts';
-import { browseMessage, isBetaShare, overviewMessage, sharedMessage } from '../../src/beta/browser.ts';
+import { browseMessage, isBetaShare, overviewMessage, sharedMessage, verifyBeta } from '../../src/beta/browser.ts';
+import { prepareSharedMessage } from '../../src/beta/share-image.ts';
 import { betaChannelPermissions } from '../../src/beta/permissions.ts';
 import { loreCatalogueInfo } from '../../src/lore/index.ts';
 import { collectDiscordMedia } from '../../src/chat/media.ts';
@@ -168,9 +169,12 @@ export class DiscordBot extends DurableObject<Env> {
             throw new ChatError('I need View Channel, Send Messages, and Embed Links here to share beta information.');
           }
           if (!interaction.message?.embeds.length) throw new ChatError('There is no beta information on this message to share.');
-          await this.rest.richMessage(interaction.channel_id, sharedMessage(interaction.message), interaction.id, remaining());
+          if (interaction.message.embeds.some(embed => embed.image) && !hasPermissions(interaction.app_permissions, 32768n)) {
+            throw new ChatError('I need Attach Files permission here to share comparison images.');
+          }
+          await this.rest.richMessage(interaction.channel_id, await prepareSharedMessage(interaction.message), interaction.id, remaining());
           await edit('Shared this page to the channel.');
-        } else await edit(await browseMessage(this.beta.client, customId, interaction.data?.values));
+        } else await edit(await browseMessage(this.beta.client, customId, interaction.data?.values, hasPermissions(interaction.app_permissions, 32768n)));
         return;
       }
       const name = interaction.data?.name;
@@ -432,8 +436,8 @@ export class DiscordBot extends DurableObject<Env> {
     }
     if (request.method !== 'POST') return new Response('Not found', { status: 404 });
     if (path === '/beta/verify') {
-      try { return Response.json({ ok: true, ...await this.beta.client.verify(), alertsEnabled: this.store.betaStates().some(state => allowsGuild(this.config, state.guildId) && Boolean(state.channelId)) }); }
-      catch { return Response.json({ ok: false, error: 'Gachabase could not be read from the hosted runtime.' }, { status: 502 }); }
+      try { return Response.json({ ok: true, ...await verifyBeta(this.beta.client), alertsEnabled: this.store.betaStates().some(state => allowsGuild(this.config, state.guildId) && Boolean(state.channelId)) }); }
+      catch { return Response.json({ ok: false, error: 'The beta source or comparison image could not be verified from the hosted runtime.' }, { status: 502 }); }
     }
     if (path === '/verify') return this.verifyProviders();
     if (path === '/start') {

@@ -50,13 +50,17 @@ export interface BetaEmbed {
   fields?: { name: string; value: string; inline?: boolean }[];
   footer: { text: string };
   timestamp?: string;
+  image?: { url: string };
 }
 
 export interface BetaMessage {
   content?: string;
   embeds: BetaEmbed[];
   components?: BetaRow[];
+  files?: BetaFile[];
 }
+
+export interface BetaFile { name: string; data: Uint8Array; description: string }
 
 export type BetaButton = { type: 2; style: 5; label: string; url: string }
   | { type: 2; style: 1 | 2; label: string; custom_id: string; disabled?: boolean };
@@ -64,5 +68,5 @@ export type BetaRow = { type: 1; components: BetaButton[] }
   | { type: 1; components: [{ type: 3; custom_id: string; placeholder: string;
     options: { label: string; value: string; description?: string; default?: boolean }[] }] };
 
-export interface BetaDetailEntry { name: string; value: string }
+export interface BetaDetailEntry { name: string; value: string; comparison?: { before: string | null; after: string | null } }
 export interface BetaSection { id: string; title: string; entries: BetaDetailEntry[] }

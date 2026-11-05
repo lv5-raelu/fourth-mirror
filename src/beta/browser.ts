@@ -7,6 +7,18 @@ import type { BetaClient } from './source.ts';
 import { entitySourceUrl } from './source.ts';
 import type { BetaDetailEntry, BetaFeed, BetaMessage, BetaRevision } from './types.ts';
 import { discordText } from './text.ts';
+import { diffImagePages } from './diff-image.ts';
+import { renderDiffImage } from './render.ts';
+
+/** Exercise the hosted source and image renderer without sending a Discord post. */
+export async function verifyBeta(client: BetaClient) {
+  const source = await client.verify();
+  const revision = (await client.feed()).revisions[0]!;
+  const entity = revision.entities.find(entity => entity.diffUrl);
+  const details = entity ? await client.entityDetails(entity, revision) : undefined;
+  const page = details ? diffImagePages(details.sections.find(section => section.id === 'changes')!.entries)[0] : undefined;
+  return { ...source, comparisonImageBytes: page ? (await renderDiffImage(page)).length : 0 };
+}
 
 /** Compile a few real comparisons without making an overview as long as a kit. */
 export async function overviewMessage(client: BetaClient, feed: BetaFeed, notifications?: BetaRevision[], page = 0): Promise<BetaMessage> {
@@ -18,9 +30,9 @@ export async function overviewMessage(client: BetaClient, feed: BetaFeed, notifi
       const details = await client.entityDetails(entity, revision, signal);
       const section = details.sections.find(section => section.id === (entity.status === 'new' ? 'kit' : 'changes')) ?? details.sections[0]!;
       const first = section.entries[0]!;
-      const [before, after] = first.value.split('\n\nAfter: ');
-      const snippet = after === undefined ? truncateDiscordText(first.value, 340, '…')
-        : `${truncateDiscordText(before!, 160, '…')}\nAfter: ${truncateDiscordText(after, 160, '…')}`;
+      const snippet = first.comparison
+        ? `${truncateDiscordText(first.comparison.before ?? 'Not present', 160, '…')}\n↓\n${truncateDiscordText(first.comparison.after ?? 'Removed', 160, '…')}`
+        : truncateDiscordText(first.value, 340, '…');
       return { name: entity.name, value: `${truncateDiscordText(first.name, 100, '…')}\n${snippet}` };
     } catch { return { name: entity.name, value: 'Details could not be retrieved. Select this entry to retry.' }; }
   }));
@@ -66,7 +78,7 @@ function splitFields(text: string): string[] {
   return parts;
 }
 
-export async function browseMessage(client: BetaClient, customId: string, values: string[] = []): Promise<BetaMessage> {
+export async function browseMessage(client: BetaClient, customId: string, values: string[] = [], imagesAllowed = true): Promise<BetaMessage> {
   const view = readView(customId, values);
   const feed = await client.feed();
   const revision = feed.revisions.find(revision => revision.key === view.revision);
@@ -78,20 +90,44 @@ export async function browseMessage(client: BetaClient, customId: string, values
   let details: Awaited<ReturnType<BetaClient['entityDetails']>>;
   try { details = await client.entityDetails(entity, revision); }
   catch { return unavailableMessage(view, revision, feed); }
-  const section = details.sections.find(section => section.id === view.section);
+  const sections = [...details.sections];
+  const changes = sections.find(section => section.id === 'changes');
+  if (changes?.entries.some(entry => entry.comparison)) sections.splice(1, 0, { ...changes, id: 'text', title: 'Text Comparison' });
+  const section = sections.find(section => section.id === view.section);
   if (!section) throw new ChatError('That section is no longer available. Select the character or item again.');
+  let imagePages: ReturnType<typeof diffImagePages> = [];
+  let imageFailure = false;
+  if (view.section === 'changes' && imagesAllowed) {
+    try { imagePages = diffImagePages(section.entries); }
+    catch { imageFailure = true; }
+  }
   const pages = detailPages(section.entries);
-  view.page = Math.min(view.page, pages.length - 1);
+  let count = imagePages.length || pages.length;
+  view.page = Math.min(view.page, count - 1);
+  let file;
+  const imagePage = imagePages[view.page];
+  if (imagePage) {
+    try { file = { name: 'beta-diff.png', data: await renderDiffImage(imagePage), description: truncateDiscordText(imagePage.text, 1_024, '…') }; }
+    catch {
+      console.warn('Beta comparison image could not be rendered.');
+      imageFailure = true; count = pages.length; view.page = Math.min(view.page, count - 1);
+    }
+  }
   const description = [`v${revision.version} · Rev. ${revision.revision} · ${entity.status}`,
-    `${section.title} · Page ${view.page + 1}/${pages.length}`,
+    `${section.title} · Page ${view.page + 1}/${count}`,
     ...(details.from && details.to ? [`Comparison: ${identityLabel(details.from)} → ${identityLabel(details.to)}`] : []),
     'Descriptions show the first listed level/rank. All Changed Values includes other levels when supplied.',
     ...(feed.stale ? ['Cached archive — Gachabase could not be refreshed.'] : []),
+    ...(file ? ['Red: removed · Green: added. Use Text Comparison for selectable text.'] : []),
+    ...(imageFailure ? ['Image preview unavailable; showing the text comparison.'] : []),
+    ...(!imagesAllowed && view.section === 'changes' ? ['Image previews need Attach Files permission here; showing the text comparison.'] : []),
   ].join('\n');
   return { embeds: [{ title: discordText(entity.name).slice(0, 256), description, color: 0xce6687, url: entitySourceUrl(entity, revision),
-    fields: pages[view.page]!, footer: { text: 'Gachabase • Unofficial beta data • Subject to change • Checked' }, timestamp: new Date(feed.checkedAt).toISOString() }],
-    components: [...entityMenu(revision, view, Math.floor(view.entity / ENTITIES_PER_PAGE)), sectionMenu(view, details.sections),
-      ...(pages.length > 1 ? [pageButtons(view, pages.length)] : []), { type: 1, components: [
+    ...(file ? { image: { url: 'attachment://beta-diff.png' } } : { fields: pages[view.page]! }),
+    footer: { text: 'Gachabase • Unofficial beta data • Subject to change • Checked' }, timestamp: new Date(feed.checkedAt).toISOString() }],
+    ...(file ? { files: [file] } : {}),
+    components: [...entityMenu(revision, view, Math.floor(view.entity / ENTITIES_PER_PAGE)), sectionMenu(view, sections),
+      ...(count > 1 ? [pageButtons(view, count)] : []), { type: 1, components: [
         { type: 2, style: 2, label: 'Back to overview', custom_id: viewId({ ...view, entity: -1, section: 'overview', page: Math.floor(view.entity / ENTITIES_PER_PAGE) }) },
         { type: 2, style: 2, label: 'Share to channel', custom_id: viewId(view, 'share') },
         { type: 2, style: 5, label: 'View source', url: entitySourceUrl(entity, revision) },

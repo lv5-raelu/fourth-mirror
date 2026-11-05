@@ -73,12 +73,15 @@ export function detailSections(before: unknown, after: unknown, rawChanges: { fi
   for (const key of new Set([...old.keys(), ...next.keys()])) {
     const prev = old.get(key), cur = next.get(key);
     if (compared && (prev?.value !== cur?.value || prev?.name !== cur?.name)) {
-      changes.push({ name: cur?.name ?? prev!.name, value: `Before: ${prev?.value ?? 'Not present'}\n\nAfter: ${cur?.value ?? 'Removed'}` });
+      const renamed = prev && cur && prev.name !== cur.name;
+      const before = prev ? (renamed ? prev.name + '\n' : '') + prev.value : null;
+      const after = cur ? (renamed ? cur.name + '\n' : '') + cur.value : null;
+      changes.push({ name: cur?.name ?? prev!.name, value: `${before ?? 'Not present'}\n\n↓\n\n${after ?? 'Removed'}`, comparison: { before, after } });
     }
   }
   // Retain the explicit numeric diff as a separate section, including higher levels
   // that might change while the first listed level's description stays the same.
-  const raw = rawChanges.map(change => ({ name: humanize(change.field), value: `${change.before ?? 'Not present'} → ${change.after ?? 'Removed'}` }));
+  const raw = rawChanges.map(change => ({ name: humanize(change.field), value: `${change.before ?? 'Not present'} → ${change.after ?? 'Removed'}`, comparison: { before: change.before, after: change.after } }));
   const sections: BetaSection[] = [{ id: 'changes', title: 'Changes', entries: changes.length ? changes : raw.length ? raw : [{ name: 'Comparison', value: compared
     ? 'No gameplay or text differences were found in the retrieved comparison. Gachabase may have updated assets or other metadata.'
     : 'No before/after comparison is available for this entry. Browse its current details below.' }] }];

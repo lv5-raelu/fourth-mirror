@@ -448,32 +448,43 @@ try {
   assert.match((await observations('edit')).at(-1).body.embeds[0].title, /Beta Archive/);
   const latestBeta = (await observations('edit')).at(-1).body;
   assert.equal(latestBeta.components.at(-1).components.at(-1).url, 'https://hsr.gachabase.net/changelog/beta?lang=en');
-  assert.match(JSON.stringify(latestBeta.embeds), /20 → 30/);
-  const betaComponent = (customId, source, values = [], overrides = {}) => command('beta', { type: 3, app_permissions: String(BigInt(permissions) | 16384n),
+  assert.match(JSON.stringify(latestBeta.embeds), /20.*↓.*30/s);
+  const betaComponent = (customId, source, values = [], overrides = {}) => command('beta', { type: 3, app_permissions: String(BigInt(permissions) | 16384n | 32768n),
     data: { component_type: values.length ? 3 : 2, custom_id: customId, values }, message: { ...source, flags: 64 }, ...overrides });
   const selectBeta = latestBeta.components[0].components[0];
   const selected = await betaComponent(selectBeta.custom_id, latestBeta, ['0']);
   assert.equal((await observations('callback')).find(call => call.path.includes(selected)).body.type, 6, 'Private navigation updates its message');
   const detailBeta = (await observations('edit')).at(-1).body;
-  assert.match(JSON.stringify(detailBeta.embeds), /20 → 30/);
+  assert.ok(detailBeta.embeds[0].image.url.startsWith('https://cdn.discordapp.com/ephemeral-attachments/'));
+  assert.deepEqual((await observations('beta-upload')).at(-1).signature, [137, 80, 78, 71, 13, 10, 26, 10]);
   const publicClick = await betaComponent(selectBeta.custom_id, latestBeta, ['0'], { message: { ...latestBeta, flags: 0 } });
   assert.deepEqual((await observations('callback')).find(call => call.path.includes(publicClick)).body, { type: 5, data: { flags: 64 } });
   const shareBeta = detailBeta.components.flatMap(row => row.components).find(component => component.label === 'Share to channel');
   const sharesBefore = (await observations('delivery')).length;
   const sourcesBeforeShare = (await observations('beta-source')).length;
+  const uploadBeforeShare = (await observations('beta-upload')).at(-1);
   await betaComponent(shareBeta.custom_id, detailBeta);
   assert.equal((await observations('delivery')).length, sharesBefore + 1);
   const sharedBeta = (await observations('delivery')).at(-1).body;
-  assert.deepEqual(sharedBeta.embeds, detailBeta.embeds);
+  assert.deepEqual(sharedBeta.embeds, detailBeta.embeds.map(embed => ({ ...embed, image: { url: 'attachment://beta-diff.png' } })));
+  assert.equal((await observations('beta-upload')).at(-1).hash, uploadBeforeShare.hash, 'Sharing uploads the exact viewed PNG again');
   assert.ok(!('flags' in sharedBeta), 'A channel share must not copy the ephemeral flag');
   assert.ok(!JSON.stringify(sharedBeta.components).includes(':share'));
   assert.deepEqual(sharedBeta.allowed_mentions.parse, []);
   assert.equal((await observations('beta-source')).length, sourcesBeforeShare, 'Sharing copies the displayed snapshot without another read');
   assert.match((await observations('edit')).at(-1).body.content, /Shared this page/);
-  for (const denied of [{ app_permissions: String(1024n | 2048n) }, { member: { user: { id: nextId() }, permissions: '1024' } },
+  const sectionsBeta = detailBeta.components.flatMap(row => row.components).find(component => component.type === 3 && component.options.some(option => option.value === 'text'));
+  await betaComponent(sectionsBeta.custom_id, detailBeta, ['text']);
+  const textBeta = (await observations('edit')).at(-1).body;
+  assert.equal(textBeta.embeds[0].image, undefined); assert.deepEqual(textBeta.attachments, []);
+  assert.match(JSON.stringify(textBeta.embeds), /20 → 30/);
+  await betaComponent(selectBeta.custom_id, latestBeta, ['0'], { app_permissions: String(BigInt(permissions) | 16384n) });
+  assert.equal((await observations('edit')).at(-1).body.embeds[0].image, undefined);
+  assert.match((await observations('edit')).at(-1).body.embeds[0].description, /Attach Files/);
+  for (const denied of [{ app_permissions: String(1024n | 2048n) }, { app_permissions: String(1024n | 2048n | 16384n) }, { member: { user: { id: nextId() }, permissions: '1024' } },
     { member: { user: { id: nextId() }, permissions, communication_disabled_until: new Date(Date.now() + 60_000).toISOString() } }]) {
     await betaComponent(shareBeta.custom_id, detailBeta, [], denied);
-    assert.match((await observations('edit')).at(-1).body.content, /permission|Embed Links/);
+    assert.match((await observations('edit')).at(-1).body.content, /permission|Embed Links|Attach Files/);
   }
   assert.equal((await observations('delivery')).length, sharesBefore + 1);
   assert.equal((await observations('model')).length, modelsBeforeBeta);
@@ -508,7 +519,10 @@ try {
   assert.deepEqual((await observations('delivery')).at(-1).body.embeds, answerBeta.embeds);
   assert.equal((await observations('model')).length, aiBeforeShare);
   assert.deepEqual(await history(), betaHistoryBefore);
-  assert.deepEqual(await request('/beta/verify', 'POST'), { ok: true, version: '9.0.51', revision: 101, entities: 1, comparisonFields: 1, alertsEnabled: true });
+  const verifiedBeta = await request('/beta/verify', 'POST');
+  assert.ok(verifiedBeta.comparisonImageBytes > 1_000);
+  const { comparisonImageBytes: _imageBytes, ...verifiedSource } = verifiedBeta;
+  assert.deepEqual(verifiedSource, { ok: true, version: '9.0.51', revision: 101, entities: 1, comparisonFields: 1, alertsEnabled: true });
   assert.ok((await observations('beta-source')).every(value => value.authorization === null));
   await response('/__crash', 'POST');
   await eventually(async () => (await request()).ready, 'beta settings survive restart');

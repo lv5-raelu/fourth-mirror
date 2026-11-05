@@ -225,7 +225,7 @@ export class BetaClient {
     const feed = await this.feed(true);
     const latest = feed.revisions[0]!;
     const entity = latest.entities.find(value => value.diffUrl);
-    const details = entity ? parseDetails(await this.data(entity.diffUrl!)) : undefined;
+    const details = entity ? await this.entityDetails(entity, latest) : undefined;
     return { version: latest.version, revision: latest.revision, entities: latest.entities.length, comparisonFields: details?.changes.length ?? 0 };
   }
 }

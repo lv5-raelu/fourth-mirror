@@ -188,6 +188,8 @@ Requests have a five-second per-user cooldown, one unanswered question per user,
 
 Fourth Mirror reads the English [Gachabase beta changelog](https://hsr.gachabase.net/changelog/beta?lang=en), including its structured before/after comparison data. Rose-colored embeds show the actual details, revision labels, source timestamps, and an optional source link. Commands respond privately; **Share to channel** posts the exact page or AI answer you are viewing to the current channel without another source read or AI request. Sharing requires permission to send messages, and the bot needs View Channel, Send Messages (Send Messages in Threads inside threads), and Embed Links. Shared selectors open a separate private view for each reader.
 
+The **Changes** section renders comparisons as PNG images, with removed words and complete numeric values in red, additions in green, and unchanged text in a neutral colour. Percentages, decimals, and signed/grouped numbers stay whole; `100% → 120%` highlights both complete values. A down arrow separates the earlier and newer text. Long comparisons have image pagination, and **Text Comparison** provides selectable text. The bot also needs **Attach Files** for image previews and image sharing; without it, browsing shows the text comparison. Sharing copies the displayed PNG from Discord and uploads it as a new channel attachment, so the public image does not depend on the private attachment’s lifetime. Rendering is local to the bot and uses no AI or external image service.
+
 | Command | Behavior |
 | --- | --- |
 | `/beta latest` | Show the latest revision with short change previews. Select a character or item to read comparisons, skills/passives, traces, eidolons, Light Cone effects, or set bonuses inside Discord. Works without AI configuration. |
@@ -202,7 +204,7 @@ Checks, detail browsing, sharing, and `/beta latest` make no AI requests. Overvi
 
 Notification settings and the revision watermark survive restarts. Announcement attempts reserve their watermark before delivery to suppress duplicate posts after crashes; an interrupted or failed send can therefore miss an announcement. Check `/beta alerts` for delivery errors and `/beta latest` for the current revision. Node stores settings in `beta-alerts.json` beside the AI history file (under `data/` when AI is disabled); keep that directory persistent. Workers stores them in the existing Durable Object. They are separate from conversation-history exports.
 
-For a hosted source check, an administrator can run the private control endpoint `POST /beta/verify` through the existing control client. It fetches the changelog and one comparison without AI calls or Discord posts. It never enables notifications.
+For a hosted source check, an administrator can run the private control endpoint `POST /beta/verify` through the existing control client. It fetches the changelog and one comparison and renders a sample PNG, reporting `comparisonImageBytes`, without AI calls or Discord posts. It never enables notifications.
 
 ## Add a command
 

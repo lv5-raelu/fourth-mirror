@@ -4,7 +4,9 @@ import type { BotContext } from '../types.ts';
 import type { PendingWork } from '../lifecycle.ts';
 import { allowsGuild } from '../config-values.ts';
 import { ChatError } from '../chat/types.ts';
-import { browseMessage, isBetaShare, sharedMessage } from '../beta/browser.ts';
+import { browseMessage, isBetaShare } from '../beta/browser.ts';
+import { prepareSharedMessage } from '../beta/share-image.ts';
+import { nodeBetaMessage } from '../beta/node-message.ts';
 import type { BetaMessage, BetaRow } from '../beta/types.ts';
 
 export async function handleCommand(
@@ -78,15 +80,18 @@ export async function handleBetaComponent(interaction: MessageComponentInteracti
         title: embed.title ?? 'HSR Beta', color: embed.color ?? 0xce6687, footer: { text: embed.footer?.text ?? 'Gachabase • Unofficial beta data' } })),
         components: interaction.message.components.map(row => row.toJSON()) as BetaRow[] };
       if (!payload.embeds.length) throw new ChatError('There is no beta information on this message to share.');
-      await channel.send({ ...sharedMessage(payload), nonce: interaction.id, enforceNonce: true, allowedMentions: { parse: [] } });
+      if (payload.embeds.some(embed => embed.image) && !interaction.appPermissions?.has(PermissionFlagsBits.AttachFiles)) {
+        throw new ChatError('I need Attach Files permission here to share comparison images.');
+      }
+      await channel.send({ ...nodeBetaMessage(await prepareSharedMessage(payload)), nonce: interaction.id, enforceNonce: true, allowedMentions: { parse: [] } });
       await interaction.editReply({ content: 'Shared this page to the channel.', allowedMentions: { parse: [] } });
       return;
     }
-    await interaction.editReply({ ...await browseMessage(context.beta.client, interaction.customId,
-      interaction.isStringSelectMenu() ? interaction.values : []), allowedMentions: { parse: [] } });
+    await interaction.editReply({ ...nodeBetaMessage(await browseMessage(context.beta.client, interaction.customId,
+      interaction.isStringSelectMenu() ? interaction.values : [], Boolean(interaction.appPermissions?.has(PermissionFlagsBits.AttachFiles)))), allowedMentions: { parse: [] } });
   } catch (error) {
     if (!(error instanceof ChatError)) context.logger.error('Beta interaction failed.', error);
-    const payload = { content: error instanceof ChatError ? error.message : 'I could not complete that beta action. Please try again.', embeds: [], components: [], allowedMentions: { parse: [] as [] } };
+    const payload = { content: error instanceof ChatError ? error.message : 'I could not complete that beta action. Please try again.', embeds: [], components: [], attachments: [], allowedMentions: { parse: [] as [] } };
     try {
       if (interaction.deferred || interaction.replied) await interaction.editReply(payload);
       else await interaction.reply({ ...payload, flags: MessageFlags.Ephemeral });
