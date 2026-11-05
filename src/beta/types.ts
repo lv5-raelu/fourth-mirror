@@ -69,5 +69,10 @@ export type BetaRow = { type: 1; components: BetaButton[] }
     options: { label: string; value: string; description?: string; default?: boolean }[] }] };
 
 export interface BetaHeading { type: string; name: string; iconUrl?: string }
-export interface BetaDetailEntry { name: string; value: string; heading?: BetaHeading; comparison?: { before: string | null; after: string | null } }
+/** UTF-16 offsets into the corresponding plain description. */
+export interface BetaTextRange { start: number; end: number }
+export interface BetaDetailEntry {
+  name: string; value: string; heading?: BetaHeading; emphasis?: BetaTextRange[];
+  comparison?: { before: string | null; after: string | null; beforeEmphasis?: BetaTextRange[]; afterEmphasis?: BetaTextRange[] };
+}
 export interface BetaSection { id: string; title: string; entries: BetaDetailEntry[] }

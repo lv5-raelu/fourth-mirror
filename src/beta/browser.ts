@@ -125,7 +125,7 @@ export async function browseMessage(client: BetaClient, customId: string, values
     ...(details.from && details.to ? [`Comparison: ${identityLabel(details.from)} → ${identityLabel(details.to)}`] : []),
     'Descriptions show the first listed level/rank. All Changed Values includes other levels when supplied.',
     ...(feed.stale ? ['Cached archive — Gachabase could not be refreshed.'] : []),
-    ...(file ? [view.section === 'changes' ? 'Red: removed · Green: added. Use Text Comparison for selectable text.' : `Use ${section.title} (Text) for selectable text.`] : []),
+    ...(file ? [view.section === 'changes' ? 'Amber: source emphasis · Red: removed · Green: added. Use Text Comparison for selectable text.' : `Use ${section.title} (Text) for selectable text.`] : []),
     ...(imageFailure ? ['Image preview unavailable; showing the text view.'] : []),
     ...(!imagesAllowed && isImageSection ? ['Image previews need Attach Files permission here; showing the text view.'] : []),
   ].join('\n');

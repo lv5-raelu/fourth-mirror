@@ -1,17 +1,42 @@
-import type { BetaDetailEntry } from './types.ts';
+import type { BetaDetailEntry, BetaTextRange } from './types.ts';
 import { wordDiff } from './diff.ts';
 import type { DiffRun } from './diff.ts';
 import { isBetaIconUrl } from './icons.ts';
 
 export const DIFF_IMAGE_WIDTH = 1_000;
 const COLUMNS = 58, LINES_PER_SIDE = 12, FONT_SIZE = 26, LINE_HEIGHT = 39;
-export const diffColors = { background: '#24262b', text: '#e3e5e8', removed: '#ff8b94', added: '#83e3a4', muted: '#b4bbc6' };
+export const diffColors = { background: '#24262b', text: '#e3e5e8', emphasis: '#f29e38', removed: '#ff8b94', added: '#83e3a4', muted: '#b4bbc6' };
 export interface DiffImagePage { svg: string; width: number; height: number; text: string; name: string; iconUrl?: string }
 const xml = (value: string): string => value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
-function wrap(runs: DiffRun[], columns = COLUMNS): DiffRun[][] {
-  const lines: DiffRun[][] = [[]];
-  const groups: DiffRun[][] = [];
+type ImageRun = DiffRun & { emphasis?: boolean };
+
+function emphasize(runs: DiffRun[], ranges: BetaTextRange[] = []): ImageRun[] {
+  const result: ImageRun[] = [];
+  let offset = 0, index = 0;
+  for (const run of runs) {
+    let cursor = 0;
+    while (cursor < run.text.length) {
+      const position = offset + cursor;
+      while (ranges[index] && ranges[index]!.end <= position) index++;
+      const range = ranges[index], emphasis = Boolean(range && range.start <= position);
+      const end = Math.min(run.text.length, range ? (emphasis ? range.end : range.start) - offset : run.text.length);
+      result.push({ ...run, text: run.text.slice(cursor, end), emphasis });
+      cursor = end;
+    }
+    offset += run.text.length;
+  }
+  return result;
+}
+
+function span(run: ImageRun, changedColor?: string, removed = false): string {
+  const color = run.changed && changedColor ? changedColor : run.emphasis ? diffColors.emphasis : diffColors.text;
+  return `<tspan fill="${color}"${removed && run.changed ? ' text-decoration="line-through"' : ''}>${xml(run.text)}</tspan>`;
+}
+
+function wrap(runs: ImageRun[], columns = COLUMNS): ImageRun[][] {
+  const lines: ImageRun[][] = [[]];
+  const groups: ImageRun[][] = [];
   // Keep punctuation attached to its word even when the word and punctuation
   // have different colours. A closing quote must not wrap onto its own line.
   for (const run of runs) for (const part of run.text.split(/(\n|[^\S\n]+)/u)) {
@@ -64,10 +89,10 @@ export function diffImagePages(entries: BetaDetailEntry[]): DiffImagePage[] {
   const pages: DiffImagePage[] = [];
   for (const entry of entries) {
     if (!entry.comparison) continue;
-    const { before, after } = entry.comparison;
+    const { before, after, beforeEmphasis, afterEmphasis } = entry.comparison;
     const diff = wordDiff(before ?? '', after ?? '');
-    const oldLines = wrap(before === null ? [{ text: 'Not present', changed: false }] : diff.before);
-    const newLines = wrap(after === null ? [{ text: 'Removed', changed: false }] : diff.after);
+    const oldLines = wrap(before === null ? [{ text: 'Not present', changed: false }] : emphasize(diff.before, beforeEmphasis));
+    const newLines = wrap(after === null ? [{ text: 'Removed', changed: false }] : emphasize(diff.after, afterEmphasis));
     const count = Math.max(1, Math.ceil(Math.max(oldLines.length, newLines.length) / LINES_PER_SIDE));
     for (let index = 0; index < count; index++) {
       const oldPage = oldLines.slice(index * LINES_PER_SIDE, (index + 1) * LINES_PER_SIDE);
@@ -75,9 +100,9 @@ export function diffImagePages(entries: BetaDetailEntry[]): DiffImagePage[] {
       const heading = header(entry);
       let y = heading.y;
       const body = heading.body;
-      const draw = (lines: DiffRun[][], color: string, removed = false): void => {
+      const draw = (lines: ImageRun[][], color: string, removed = false): void => {
         for (const line of lines) {
-          body.push(`<text x="36" y="${y}" xml:space="preserve">${line.map(run => `<tspan fill="${run.changed ? color : diffColors.text}"${removed && run.changed ? ' text-decoration="line-through"' : ''}>${xml(run.text)}</tspan>`).join('')}</text>`);
+          body.push(`<text x="36" y="${y}" xml:space="preserve">${line.map(run => span(run, color, removed)).join('')}</text>`);
           y += LINE_HEIGHT;
         }
       };
@@ -89,9 +114,9 @@ export function diffImagePages(entries: BetaDetailEntry[]): DiffImagePage[] {
       y += 76;
       draw(newPage.length ? newPage : [[{ text: '(Earlier text shown on previous page)', changed: false }]], diffColors.added);
       y += 24;
-      body.push(`<text x="36" y="${y}" font-size="19"><tspan fill="${diffColors.removed}">− Removed</tspan><tspan fill="${diffColors.muted}">   →   </tspan><tspan fill="${diffColors.added}">+ Added</tspan></text>`);
+      body.push(`<text x="36" y="${y}" font-size="19"><tspan fill="${diffColors.removed}">− Removed</tspan><tspan fill="${diffColors.muted}">   →   </tspan><tspan fill="${diffColors.added}">+ Added</tspan><tspan fill="${diffColors.muted}">   ·   </tspan><tspan fill="${diffColors.emphasis}">Source emphasis</tspan></text>`);
       const height = y + 34;
-      const plain = (lines: DiffRun[][]): string => lines.map(line => line.map(run => run.text).join('')).join('\n');
+      const plain = (lines: ImageRun[][]): string => lines.map(line => line.map(run => run.text).join('')).join('\n');
       const text = `${entry.name}\n${plain(oldPage)}\n↓\n${plain(newPage)}`;
       pages.push(finish(entry, body, height, text, heading.iconUrl));
     }
@@ -103,7 +128,7 @@ export function diffImagePages(entries: BetaDetailEntry[]): DiffImagePage[] {
 export function currentImagePages(entries: BetaDetailEntry[]): DiffImagePage[] {
   const pages: DiffImagePage[] = [];
   for (const entry of entries) {
-    const lines = wrap([{ text: entry.value, changed: false }]);
+    const lines = wrap(emphasize([{ text: entry.value, changed: false }], entry.emphasis));
     const count = Math.max(1, Math.ceil(lines.length / (LINES_PER_SIDE * 2)));
     for (let index = 0; index < count; index++) {
       const heading = header(entry), body = heading.body;
@@ -111,7 +136,7 @@ export function currentImagePages(entries: BetaDetailEntry[]): DiffImagePage[] {
       if (count > 1) { body.push(`<text x="36" y="${y}" font-size="20" fill="${diffColors.muted}">Continuation ${index + 1}/${count}</text>`); y += 38; }
       const page = lines.slice(index * LINES_PER_SIDE * 2, (index + 1) * LINES_PER_SIDE * 2);
       for (const line of page) {
-        body.push(`<text x="36" y="${y}" xml:space="preserve">${line.map(run => xml(run.text)).join('')}</text>`); y += LINE_HEIGHT;
+        body.push(`<text x="36" y="${y}" xml:space="preserve">${line.map(run => span(run)).join('')}</text>`); y += LINE_HEIGHT;
       }
       y += 24;
       body.push(`<text x="36" y="${y}" font-size="19" fill="${diffColors.muted}">Current beta details</text>`);

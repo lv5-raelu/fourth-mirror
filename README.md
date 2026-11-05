@@ -192,6 +192,8 @@ The **Changes** section renders comparisons as PNG images, with removed words an
 
 Skill, passive, trace, and eidolon pages show the GachaBase icon to the left of the ability type and name. Current kit sections use one ability per image page, with matching **(Text)** sections for selectable text. Icons come from the revision’s asset references, are cached, and are embedded in the shared PNG; missing or unavailable icons leave the title and details readable. Artwork changes alone do not count as gameplay changes.
 
+Rendered descriptions preserve GachaBase’s amber emphasis for tooltip values and highlighted phrases. In comparisons, unchanged emphasized text stays amber; changed words and complete numeric values use red or green so changes remain distinct. The emphasis survives wrapping, pagination, and channel sharing. Formatting changes alone do not count as gameplay changes.
+
 | Command | Behavior |
 | --- | --- |
 | `/beta latest` | Show the latest revision with short change previews. Select a character or item to read comparisons, skills/passives, traces, eidolons, Light Cone effects, or set bonuses inside Discord. Works without AI configuration. |
