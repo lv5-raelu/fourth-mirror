@@ -30,13 +30,32 @@ export class MockDiscord extends DurableObject {
     this.contextTargets = {};
     this.betaRevision = 100;
     this.betaEmbedLinks = true;
+    this.uploads = new Map();
   }
   record(kind, data) { this.sql.exec('INSERT INTO observations VALUES (?, ?)', kind, JSON.stringify(data)); }
+  async messageBody(request) {
+    if (!request.headers.get('Content-Type')?.startsWith('multipart/form-data')) return request.json();
+    const form = await request.formData();
+    const body = JSON.parse(form.get('payload_json'));
+    for (const [name, file] of form) {
+      if (!name.startsWith('files[')) continue;
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(value => value.toString(16).padStart(2, '0')).join('');
+      this.record('beta-upload', { filename: file.name, size: bytes.length, signature: [...bytes.slice(0, 8)], hash, authorization: request.headers.get('Authorization') });
+      const attachmentPath = `/ephemeral-attachments/333456789012345678/${900000000000000000n + BigInt(this.uploads.size)}/${file.name}`;
+      this.uploads.set(attachmentPath, bytes);
+      if (new URL(request.url).pathname.startsWith('/api/v10/webhooks/') || new URL(request.url).pathname.startsWith('/webhooks/')) {
+        for (const embed of body.embeds ?? []) if (embed.image?.url === 'attachment://' + file.name) embed.image.url = 'https://cdn.discordapp.com' + attachmentPath;
+      }
+    }
+    return body;
+  }
   async fetch(request) {
     const url = new URL(request.url);
     const path = url.pathname.replace(/^\/api\/v10/, '');
     if (['cdn.discordapp.com', 'media.discordapp.net', 'gif.fxtwitter.com'].includes(url.hostname)) {
       this.record('media', { path, authorization: request.headers.get('Authorization') });
+      if (path.endsWith('/beta-diff.png')) return this.uploads.has(path) ? new Response(this.uploads.get(path), { headers: { 'Content-Type': 'image/png' } }) : new Response('Missing comparison', { status: 404 });
       if (path.endsWith('.webp')) return new Response(Uint8Array.from(atob('UklGRuYAAABXRUJQVlA4WAoAAAACAAAAAQAAAAAAQU5JTQYAAAAAAP//AABBTk1GKAAAAAAAAAAAAAEAAAAAAGQAAAJWUDhMDwAAAC8BAAAABxD9j/4HIqL/AQBBTk1GKAAAAAAAAAAAAAAAAAAAAGQAAABWUDhMDwAAAC8AAAAAB9D/iP4HIqL/AQBBTk1GKgAAAAAAAAAAAAEAAAAAAGQAAAFWUDhMEQAAAC8BAAAADxDzv//zHw4yov8BAEFOTUYoAAAAAAAAAAAAAAAAAAAAZAAAAFZQOEwPAAAALwAAAAAH0P+I/gciov8BAA=='), char => char.charCodeAt(0)));
       if (path.endsWith('.json')) return Response.json({ v: '5.5.7', w: 32, h: 32, ip: 0, op: 20, fr: 10, layers: [{
         ty: 1, ind: 1, ip: 0, op: 20, sw: 8, sh: 8, sc: '#ff0000', ks: { o: { a: 0, k: 100 }, r: { a: 0, k: 0 },
@@ -68,7 +87,9 @@ export class MockDiscord extends DurableObject {
       this.socket = server;
       server.accept();
       this.record('connection', { host: url.hostname });
-      server.send(JSON.stringify({ op: 10, d: { heartbeat_interval: 100 } }));
+      // Leave room for a cold WASM image render on slower CI runners while
+      // keeping missing-heartbeat recovery well inside the test deadline.
+      server.send(JSON.stringify({ op: 10, d: { heartbeat_interval: 500 } }));
       server.addEventListener('message', event => {
         const packet = JSON.parse(event.data);
         this.record('packet', { ...packet, at: Date.now() });
@@ -133,7 +154,7 @@ export class MockDiscord extends DurableObject {
       return new Response(null, { status: 204 });
     }
     if (path.startsWith('/webhooks/') && request.method === 'PATCH') {
-      this.record('edit', { path, body: await request.json(), authorization: request.headers.get('Authorization') });
+      this.record('edit', { path, body: await this.messageBody(request), authorization: request.headers.get('Authorization') });
       return Response.json({ id: '993456789012345678' });
     }
     if (/^\/channels\/\d+\/messages$/.test(path) && request.method === 'GET') {
@@ -147,7 +168,7 @@ export class MockDiscord extends DurableObject {
       return Response.json(messages.filter(message => BigInt(message.id) < BigInt(url.searchParams.get('before'))).slice(0, Number(url.searchParams.get('limit'))));
     }
     if (path.endsWith('/messages') && request.method === 'POST') {
-      const body = await request.json();
+      const body = await this.messageBody(request);
       this.record('message-attempt', { path, body });
       if (this.mode === 'history-denied' && body.message_reference) return Response.json({}, { status: 403 });
       if (this.mode === 'delivery-fail') return Response.json({}, { status: 503 });

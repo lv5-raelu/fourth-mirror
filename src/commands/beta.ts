@@ -3,6 +3,7 @@ import { commandDefinitions } from './definitions.ts';
 import { executeBeta } from '../beta/feature.ts';
 import { ChatError } from '../chat/types.ts';
 import type { Command } from '../types.ts';
+import { nodeBetaMessage } from '../beta/node-message.ts';
 
 export const beta: Command = {
   data: new SlashCommandBuilder().setName(commandDefinitions.beta.name).setDescription(commandDefinitions.beta.description)
@@ -22,7 +23,7 @@ export const beta: Command = {
       await executeBeta({ action: interaction.options.getSubcommand(), userId: interaction.user.id,
         canManage: Boolean(interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)),
         ...(question !== null ? { question } : {}), ...(channel ? { channelId: channel.id } : {}), ...(enabled !== null ? { enabled } : {}),
-      }, context.beta.forGuild(interaction.guildId!), context.chat, async payload => { await interaction.editReply({ ...payload, allowedMentions: { parse: [] } }); }, async id => {
+      }, context.beta.forGuild(interaction.guildId!), context.chat, async payload => { await interaction.editReply({ ...nodeBetaMessage(payload), allowedMentions: { parse: [] } }); }, async id => {
         const target = await interaction.client.channels.fetch(id);
         if (!target || !('guildId' in target) || target.guildId !== interaction.guildId ||
           (target.type !== ChannelType.GuildText && target.type !== ChannelType.GuildAnnouncement)) throw new ChatError('Choose a regular text or announcement channel in this server.');
@@ -32,7 +33,7 @@ export const beta: Command = {
       });
     } catch (error) {
       if (!(error instanceof ChatError)) throw error;
-      await interaction.editReply({ content: error.message, embeds: [], components: [], allowedMentions: { parse: [] } });
+      await interaction.editReply({ content: error.message, embeds: [], components: [], attachments: [], allowedMentions: { parse: [] } });
     }
   },
 };

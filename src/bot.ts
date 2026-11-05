@@ -14,6 +14,7 @@ import { ServerBeta } from './beta/servers.ts';
 import { allowsGuild } from './config-values.ts';
 import { BetaFileStore } from './beta/file-store.ts';
 import { overviewMessage, sharedMessage } from './beta/browser.ts';
+import { nodeBetaMessage } from './beta/node-message.ts';
 
 export interface Bot {
   readonly client: Client;
@@ -43,7 +44,7 @@ export async function createBot(config: Config): Promise<Bot> {
       const target = await client.channels.fetch(channelId);
       if (!target || !('guildId' in target) || target.guildId !== guildId ||
         (target.type !== 0 && target.type !== 5)) throw new Error('Invalid beta notification channel.');
-      await target.send({ ...sharedMessage(await overviewMessage(betaClient, { checkedAt, revisions }, revisions)), nonce, enforceNonce: true, allowedMentions: { parse: [] } });
+      await target.send({ ...nodeBetaMessage(sharedMessage(await overviewMessage(betaClient, { checkedAt, revisions }, revisions))), nonce, enforceNonce: true, allowedMentions: { parse: [] } });
     })).catch(() => logger.warn('Beta notification check could not finish.'));
   }, 60_000);
   betaTimer.unref();

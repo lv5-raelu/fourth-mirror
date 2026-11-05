@@ -61,6 +61,27 @@ test('Discord transport rejects redirects and server failures without retrying a
   assert.equal(calls, 2);
 });
 
+test('Discord transport uploads image bytes as multipart data and clears previous images on a text edit', async t => {
+  const original = globalThis.fetch; t.after(() => { globalThis.fetch = original; });
+  const calls = [];
+  globalThis.fetch = async (_url, options) => { calls.push(options); return Response.json({ id: '223456789012345678' }); };
+  const rest = new DiscordRest('synthetic-token');
+  const bytes = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
+  await rest.editInteraction('123456789012345678', 'synthetic-interaction', {
+    embeds: [{ title: 'Comparison', color: 1, footer: { text: 'Beta' }, image: { url: 'attachment://beta-diff.png' } }],
+    files: [{ name: 'beta-diff.png', data: bytes, description: '100% → 120%' }],
+  });
+  const form = calls[0].body;
+  assert.ok(form instanceof FormData);
+  assert.equal(calls[0].headers.Authorization, undefined);
+  assert.equal(calls[0].headers['Content-Type'], undefined, 'Fetch supplies the multipart boundary');
+  const payload = JSON.parse(form.get('payload_json'));
+  assert.ok(!('files' in payload)); assert.equal(payload.attachments[0].description, '100% → 120%');
+  assert.deepEqual(new Uint8Array(await form.get('files[0]').arrayBuffer()), bytes);
+  await rest.editInteraction('123456789012345678', 'synthetic-interaction', { embeds: [] });
+  assert.deepEqual(JSON.parse(calls[1].body).attachments, []);
+});
+
 test('Discord route headers delay shared buckets and retry-after delays an explicitly rejected call', async t => {
   const original = globalThis.fetch; t.after(() => { globalThis.fetch = original; });
   let calls = 0;

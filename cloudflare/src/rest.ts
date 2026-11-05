@@ -8,6 +8,16 @@ export class DiscordError extends Error {
 const wait = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 export const allowedMentions = { parse: [], replied_user: false };
 
+function betaBody(message: BetaMessage, extra: Record<string, unknown>): Record<string, unknown> | FormData {
+  const { files, ...payload } = message;
+  const body = { ...payload, ...extra, attachments: (files ?? []).map((file, id) => ({ id, filename: file.name, description: file.description })) };
+  if (!files?.length) return body;
+  const form = new FormData();
+  form.set('payload_json', JSON.stringify(body));
+  files.forEach((file, index) => form.set(`files[${index}]`, new Blob([new Uint8Array(file.data).buffer], { type: 'image/png' }), file.name));
+  return form;
+}
+
 export class DiscordRest {
   private queue: Promise<unknown> = Promise.resolve();
   private globalUntil = 0;
@@ -45,9 +55,9 @@ export class DiscordRest {
       const response = await fetch(url, {
         method, headers: {
           ...(auth ? { Authorization: 'Bot ' + this.token } : {}),
-          ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+          ...(body === undefined || body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
         },
-        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        ...(body === undefined ? {} : { body: body instanceof FormData ? body : JSON.stringify(body) }),
         redirect: 'manual', signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(Math.max(1, deadline - Date.now()))])
           : AbortSignal.timeout(Math.max(1, deadline - Date.now())),
       });
@@ -86,11 +96,11 @@ export class DiscordRest {
   }
 
   async richMessage(channelId: string, payload: BetaMessage, nonce: string, deadlineMs = 20_000): Promise<void> {
-    await this.request('POST', `/channels/${channelId}/messages`, { ...payload, allowed_mentions: allowedMentions, nonce, enforce_nonce: true }, { deadlineMs });
+    await this.request('POST', `/channels/${channelId}/messages`, betaBody(payload, { allowed_mentions: allowedMentions, nonce, enforce_nonce: true }), { deadlineMs });
   }
 
   async editInteraction(applicationId: string, token: string, content: string | BetaMessage, deadlineMs = 20_000): Promise<void> {
     await this.request('PATCH', `/webhooks/${applicationId}/${encodeURIComponent(token)}/messages/@original`,
-      { ...(typeof content === 'string' ? { content, embeds: [], components: [] } : content), allowed_mentions: allowedMentions }, { auth: false, deadlineMs });
+      betaBody(typeof content === 'string' ? { content, embeds: [], components: [] } : content, { allowed_mentions: allowedMentions }), { auth: false, deadlineMs });
   }
 }
