@@ -599,8 +599,12 @@ try {
   await control({ ack: false });
   const missed = (await observations('connection')).length;
   await eventually(async () => (await observations('connection')).length > missed, 'missing ACK reconnect');
+  const restoredAt = Date.now();
   await control({ ack: true });
-  await eventually(async () => (await request()).ready, 'reconnected');
+  await eventually(async () => {
+    const status = await request();
+    return status.ready && status.lastAckAt >= restoredAt;
+  }, 'reconnected with a fresh heartbeat acknowledgement');
   const identifies = (await observations('packet')).filter(packet => packet.op === 2).length;
   await control({ packet: { op: 9, d: false } });
   await eventually(async () => (await observations('packet')).filter(packet => packet.op === 2).length > identifies, 'invalid session identify');
