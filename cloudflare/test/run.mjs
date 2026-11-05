@@ -446,7 +446,36 @@ try {
   await betaCommand('latest');
   assert.ok((await observations('edit')).at(-1).body.embeds?.length, JSON.stringify({ edit: (await observations('edit')).at(-1), source: await observations('beta-source'), unexpected: await observations('unexpected') }));
   assert.match((await observations('edit')).at(-1).body.embeds[0].title, /Beta Archive/);
-  assert.equal((await observations('edit')).at(-1).body.components[0].components[0].url, 'https://hsr.gachabase.net/changelog/beta?lang=en');
+  const latestBeta = (await observations('edit')).at(-1).body;
+  assert.equal(latestBeta.components.at(-1).components.at(-1).url, 'https://hsr.gachabase.net/changelog/beta?lang=en');
+  assert.match(JSON.stringify(latestBeta.embeds), /20 → 30/);
+  const betaComponent = (customId, source, values = [], overrides = {}) => command('beta', { type: 3, app_permissions: String(BigInt(permissions) | 16384n),
+    data: { component_type: values.length ? 3 : 2, custom_id: customId, values }, message: { ...source, flags: 64 }, ...overrides });
+  const selectBeta = latestBeta.components[0].components[0];
+  const selected = await betaComponent(selectBeta.custom_id, latestBeta, ['0']);
+  assert.equal((await observations('callback')).find(call => call.path.includes(selected)).body.type, 6, 'Private navigation updates its message');
+  const detailBeta = (await observations('edit')).at(-1).body;
+  assert.match(JSON.stringify(detailBeta.embeds), /20 → 30/);
+  const publicClick = await betaComponent(selectBeta.custom_id, latestBeta, ['0'], { message: { ...latestBeta, flags: 0 } });
+  assert.deepEqual((await observations('callback')).find(call => call.path.includes(publicClick)).body, { type: 5, data: { flags: 64 } });
+  const shareBeta = detailBeta.components.flatMap(row => row.components).find(component => component.label === 'Share to channel');
+  const sharesBefore = (await observations('delivery')).length;
+  const sourcesBeforeShare = (await observations('beta-source')).length;
+  await betaComponent(shareBeta.custom_id, detailBeta);
+  assert.equal((await observations('delivery')).length, sharesBefore + 1);
+  const sharedBeta = (await observations('delivery')).at(-1).body;
+  assert.deepEqual(sharedBeta.embeds, detailBeta.embeds);
+  assert.ok(!('flags' in sharedBeta), 'A channel share must not copy the ephemeral flag');
+  assert.ok(!JSON.stringify(sharedBeta.components).includes(':share'));
+  assert.deepEqual(sharedBeta.allowed_mentions.parse, []);
+  assert.equal((await observations('beta-source')).length, sourcesBeforeShare, 'Sharing copies the displayed snapshot without another read');
+  assert.match((await observations('edit')).at(-1).body.content, /Shared this page/);
+  for (const denied of [{ app_permissions: String(1024n | 2048n) }, { member: { user: { id: nextId() }, permissions: '1024' } },
+    { member: { user: { id: nextId() }, permissions, communication_disabled_until: new Date(Date.now() + 60_000).toISOString() } }]) {
+    await betaComponent(shareBeta.custom_id, detailBeta, [], denied);
+    assert.match((await observations('edit')).at(-1).body.content, /permission|Embed Links/);
+  }
+  assert.equal((await observations('delivery')).length, sharesBefore + 1);
   assert.equal((await observations('model')).length, modelsBeforeBeta);
   await betaCommand('alerts', [{ name: 'channel', type: 7, value: parent }]);
   assert.match((await observations('edit')).at(-1).body.content, /Manage Server/);
@@ -473,6 +502,11 @@ try {
   const grounding = JSON.parse(betaModel.messages.at(-2).content).source_context;
   assert.equal(JSON.parse(grounding.content).details[0].changes[0].after, '30');
   assert.match((await observations('edit')).at(-1).body.embeds[0].title, /Beta Inquiry/);
+  const answerBeta = (await observations('edit')).at(-1).body;
+  const aiBeforeShare = (await observations('model')).length;
+  await betaComponent('beta:answer:share', answerBeta);
+  assert.deepEqual((await observations('delivery')).at(-1).body.embeds, answerBeta.embeds);
+  assert.equal((await observations('model')).length, aiBeforeShare);
   assert.deepEqual(await history(), betaHistoryBefore);
   assert.deepEqual(await request('/beta/verify', 'POST'), { ok: true, version: '9.0.51', revision: 101, entities: 1, comparisonFields: 1, alertsEnabled: true });
   assert.ok((await observations('beta-source')).every(value => value.authorization === null));
@@ -480,15 +514,15 @@ try {
   await eventually(async () => (await request()).ready, 'beta settings survive restart');
   assert.equal((await request()).betaAlerts.enabled, true);
   await request('/__beta_due', 'POST'); await pause(100);
-  assert.equal((await observations('delivery')).length, postsBeforeBeta + 1);
+  assert.equal((await observations('delivery')).length, postsBeforeBeta + 2);
   await control({ mode: 'beta-outage', betaRevision: 102 });
   await request('/__beta_due', 'POST');
   await eventually(async () => Boolean((await request()).betaAlerts.lastError), 'beta outage recorded');
-  assert.equal((await observations('delivery')).length, postsBeforeBeta + 1);
+  assert.equal((await observations('delivery')).length, postsBeforeBeta + 2);
   await betaCommand('alerts', [{ name: 'enabled', type: 5, value: false }], true);
   assert.equal((await request()).betaAlerts.enabled, false);
   await control({ mode: 'normal' });
-  pass('Beta commands render source-linked embeds, ground AI in comparisons without saving chats, enforce admin/channel permissions, and announce new revisions once across restarts without AI polling');
+  pass('Beta commands compile source details, browse privately, share exact pages and answers with channel permissions, and announce new revisions once across restarts without AI polling');
 
   await request('/drain', 'POST');
   await request('/__beta_legacy', 'POST', { guildId: guild, channelId: null, checkpoint: null, nextCheckAt: 0,

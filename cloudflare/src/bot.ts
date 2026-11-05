@@ -22,7 +22,7 @@ import { ServerBeta } from '../../src/beta/servers.ts';
 import { allowsGuild } from '../../src/config-values.ts';
 import { executeBeta } from '../../src/beta/feature.ts';
 import type { BetaMessage } from '../../src/beta/types.ts';
-import { latestMessage } from '../../src/beta/presentation.ts';
+import { browseMessage, isBetaShare, overviewMessage, sharedMessage } from '../../src/beta/browser.ts';
 import { betaChannelPermissions } from '../../src/beta/permissions.ts';
 import { loreCatalogueInfo } from '../../src/lore/index.ts';
 import { collectDiscordMedia } from '../../src/chat/media.ts';
@@ -33,7 +33,8 @@ interface InteractionOption { name: string; type?: number; value?: unknown; opti
 interface Interaction {
   id: string; type: number; token: string; application_id: string; guild_id?: string; channel_id: string;
   app_permissions?: string; member?: { user: User; permissions?: string; nick?: string; communication_disabled_until?: string | null };
-  data?: { type?: number; name?: string; options?: InteractionOption[] };
+  data?: { type?: number; name?: string; options?: InteractionOption[]; custom_id?: string; values?: string[] };
+  message?: BetaMessage & { flags?: number };
 }
 interface Message {
   id: string; guild_id?: string; channel_id: string; author: User; content: string;
@@ -106,11 +107,12 @@ export class DiscordBot extends DurableObject<Env> {
     this.ctx.storage.transactionSync(() => {
       const data = packet.d as Partial<Interaction & Message> | null;
       if (this.active.size < 50 && data && typeof data.id === 'string' && idPattern.test(data.id) && typeof data.channel_id === 'string' && idPattern.test(data.channel_id)) {
-        if (packet.t === 'INTERACTION_CREATE' && data.type === 2 && data.data?.type !== 2 && data.data?.type !== 3 &&
+        if (packet.t === 'INTERACTION_CREATE' && ((data.type === 2 && data.data?.type !== 2 && data.data?.type !== 3) ||
+          (data.type === 3 && data.data?.custom_id?.startsWith('beta:'))) &&
           data.application_id === this.config.applicationId && typeof data.token === 'string' && data.member?.user?.id) {
           const interaction = data as Interaction;
           const entry: JournalEntry = { id: interaction.id, kind: 'interaction', channelId: interaction.channel_id,
-            token: interaction.token, command: interaction.data?.name ?? '', createdAt: Date.now() };
+            token: interaction.token, command: interaction.data?.name ?? 'beta browse', createdAt: Date.now() };
           if (this.store.claim(entry)) task = () => this.command(interaction, entry);
         } else if (packet.t === 'MESSAGE_CREATE' && this.chat && allowsGuild(this.config, data.guild_id) &&
           data.author?.id && !data.author.bot && !data.webhook_id && [0, 19].includes(data.type ?? 0)) {
@@ -147,11 +149,30 @@ export class DiscordBot extends DurableObject<Env> {
     const edit = (content: string | BetaMessage): Promise<void> => this.rest.editInteraction(this.config.applicationId, interaction.token, content, remaining());
     try {
       // Acknowledge before channel checks or other REST work. Do not queue behind ordinary messages.
+      const update = interaction.type === 3 && !isBetaShare(interaction.data?.custom_id ?? '') && Boolean((interaction.message?.flags ?? 0) & 64);
       await this.rest.request('POST', `/interactions/${interaction.id}/${encodeURIComponent(interaction.token)}/callback`,
-        { type: 5, data: { flags: 64 } }, { immediate: true, deadlineMs: 2_000, auth: false });
+        update ? { type: 6 } : { type: 5, data: { flags: 64 } }, { immediate: true, deadlineMs: 2_000, auth: false });
       deferred = true;
       if (!allowsGuild(this.config, interaction.guild_id)) { await edit('This bot is not enabled in this server.'); return; }
       if (!this.gateway.state().accepting || this.active.size > 50) { await edit('I’m updating or busy. Please try the command again shortly.'); return; }
+      if (interaction.type === 3) {
+        const customId = interaction.data!.custom_id!;
+        if (isBetaShare(customId)) {
+          const channel = await this.rest.request<Channel>('GET', `/channels/${interaction.channel_id}`, undefined, { deadlineMs: remaining() });
+          if (channel.guild_id !== interaction.guild_id) throw new ChatError('Share beta information in the same server channel.');
+          const sendPermission = [10, 11, 12].includes(channel.type) ? 1n << 38n : 2048n;
+          if (!hasPermissions(interaction.member?.permissions, 1024n | sendPermission) || Date.parse(interaction.member?.communication_disabled_until ?? '') > Date.now()) {
+            throw new ChatError('You need permission to send messages in this channel to share beta information.');
+          }
+          if (!hasPermissions(interaction.app_permissions, 1024n | sendPermission | 16384n)) {
+            throw new ChatError('I need View Channel, Send Messages, and Embed Links here to share beta information.');
+          }
+          if (!interaction.message?.embeds.length) throw new ChatError('There is no beta information on this message to share.');
+          await this.rest.richMessage(interaction.channel_id, sharedMessage(interaction.message), interaction.id, remaining());
+          await edit('Shared this page to the channel.');
+        } else await edit(await browseMessage(this.beta.client, customId, interaction.data?.values));
+        return;
+      }
       const name = interaction.data?.name;
       if (name === 'ping') {
         await edit(`Pong! Gateway heartbeat: ${this.gateway.latency === null ? 'measuring…' : `${Math.round(this.gateway.latency)} ms`}`);
@@ -350,7 +371,7 @@ export class DiscordBot extends DurableObject<Env> {
     if (this.gateway.ready && this.gateway.state().accepting) this.track(() => this.beta.check(id => allowsGuild(this.config, id), async (guildId, channelId, revisions, checkedAt, nonce) => {
       const channel = await this.rest.request<Channel>('GET', `/channels/${channelId}`);
       if (channel.guild_id !== guildId || ![0, 5].includes(channel.type)) throw new Error('Invalid beta notification channel.');
-      await this.rest.richMessage(channelId, latestMessage({ checkedAt, revisions }, revisions), nonce);
+      await this.rest.richMessage(channelId, sharedMessage(await overviewMessage(this.beta.client, { checkedAt, revisions }, revisions)), nonce);
     }));
     const lastPrune = this.store.getState<number>('lastPrune') ?? 0;
     if (Date.now() - lastPrune >= 3600_000) {
