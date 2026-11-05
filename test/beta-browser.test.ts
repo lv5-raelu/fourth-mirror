@@ -109,7 +109,7 @@ test('navigates kits and paginates long descriptions completely within Discord l
   const { client } = fixture(1, 'long text 😀 \\ | '.repeat(800) + 'END OF DESCRIPTION');
   const overview = await overviewMessage(client, await client.feed());
   let message = await browseMessage(client, control(overview, 'entity'), ['0']);
-  message = await browseMessage(client, control(message, 'section'), ['kit']);
+  message = await browseMessage(client, control(message, 'section'), ['textkit']);
   const output: string[] = [];
   for (let pageIndex = 0; pageIndex < 40; pageIndex++) {
     assertLimits(message); output.push(...message.embeds[0]!.fields!.map(field => field.value));

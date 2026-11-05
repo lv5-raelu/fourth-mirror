@@ -2,6 +2,7 @@ import { Buffer } from 'node:buffer';
 import { initWasm, Resvg } from '@resvg/resvg-wasm';
 import { fontBase64 } from './fonts/noto-sans-mono.ts';
 import type { DiffImagePage } from './diff-image.ts';
+import { betaIcons } from './icons.ts';
 
 let module: Parameters<typeof initWasm>[0] | undefined;
 let initializing: Promise<void> | undefined;
@@ -25,10 +26,20 @@ export async function renderDiffImage(page: DiffImagePage): Promise<Uint8Array> 
       if (page.width > 1_000 || page.height > 1_600) throw new Error('Comparison image exceeds the rendering limit.');
       initializing ??= initialize().catch(error => { initializing = undefined; throw error; });
       await initializing;
+      const icon = page.iconUrl ? await betaIcons.load(page.iconUrl) : undefined;
       const renderer = new Resvg(page.svg, { font: { fontBuffers: [font], defaultFontFamily: 'Noto Sans Mono' } });
       try {
+        let resolved = !page.iconUrl;
+        if (icon && page.iconUrl) {
+          try { renderer.resolveImage(page.iconUrl, icon); resolved = true; }
+          catch { /* The title and comparison remain readable if an icon cannot be decoded. */ }
+        }
         const rendered = renderer.render();
-        try { return new Uint8Array(rendered.asPng()); }
+        try {
+          // Do not cache a missing-icon result indefinitely after a temporary outage.
+          if (!resolved && images.get(page.svg) === image) images.delete(page.svg);
+          return new Uint8Array(rendered.asPng());
+        }
         finally { rendered.free(); }
       } finally { renderer.free(); }
     })();

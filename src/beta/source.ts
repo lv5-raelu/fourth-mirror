@@ -117,7 +117,7 @@ export function parseDetails(body: string) {
     return { version: ident.version, revision: ident.revision, branch: ident.branch };
   };
   return { from: identity(data.sourceIdent), to: identity(data.targetIdent), changes: before.size ? changes : [],
-    sections: detailSections(beforeDto, afterDto, before.size ? changes : [], before.size > 0),
+    sections: detailSections(beforeDto, afterDto, before.size ? changes : [], before.size > 0, record(data.source)?.refs, record(data.target)?.refs ?? data.refs),
     current: [...after].slice(0, 120).map(([field, value]) => ({ field, value })) };
 }
 
