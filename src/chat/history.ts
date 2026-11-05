@@ -42,7 +42,7 @@ export function parseHistory(data: unknown): { version: 1; sessions: ChatSession
   return { version: 1, sessions: data.sessions.map(({ threadId, ownerId, updatedAt, history, mode }) => ({
     threadId, ownerId, updatedAt, ...(mode ? { mode } : {}),
     history: history.map(({ role, content, speaker, media }) => ({ role, content, ...(speaker ? { speaker: { id: speaker.id, name: speaker.name } } : {}),
-      ...(media?.length ? { media: media.map(({ url, name, kind }) => ({ url, name, kind })) } : {}),
+      ...(media?.length ? { media: media.map(({ url, name, kind, previewUrl }) => ({ url, name, kind, ...(previewUrl ? { previewUrl } : {}) })) } : {}),
     })),
   })) };
 }

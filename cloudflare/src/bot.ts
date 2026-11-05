@@ -1,4 +1,5 @@
 import { DurableObject } from 'cloudflare:workers';
+import './media.ts';
 import { ChatService } from '../../src/chat/service.ts';
 import { ChatError } from '../../src/chat/types.ts';
 import { OpenAICompatibleProvider } from '../../src/chat/provider.ts';

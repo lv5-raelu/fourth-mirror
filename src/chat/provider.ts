@@ -49,7 +49,7 @@ export class OpenAICompatibleProvider implements ChatProvider {
       const tools = [...(loreTurn && this.#config.loreTools !== false ? [loreToolDefinition] : []), ...(webTurn ? webToolDefinitions : [])];
       if (messages.findLast(message => message.role === 'user')?.media?.length && this.#config.vision === false) throw new ChatError('Image understanding is disabled for this bot’s model. Please send a text question.');
       const hasMedia = this.#config.vision !== false && (messages.some(message => message.media?.length) || [...(context?.referencedMessages ?? []), ...(context?.recentMessages ?? [])].some(message => message.media?.length));
-      const systemPrompt = this.#config.systemPrompt + (this.#lore ? '\n\n' + lorePrimer : '') + (context ? '\n\n' + (context.source ? sourceInstructions : channelContextInstructions) : '') + (messages.some(message => message.speaker) ? '\n\n' + groupInstructions : '') + (webTurn ? '\n\n' + webInstructions() : '') + (hasMedia ? '\n\n' + mediaInstructions : '') + '\n\n' + responseStyleInstructions + '\n\n' + citationInstructions + '\n\n' + responseLanguageInstructions + '\n\n' + safetyInstructions;
+      const systemPrompt = this.#config.systemPrompt + (this.#lore ? '\n\n' + lorePrimer : '') + (context ? '\n\n' + (context.source ? sourceInstructions : channelContextInstructions) : '') + (messages.some(message => message.speaker) ? '\n\n' + groupInstructions : '') + (webTurn ? '\n\n' + webInstructions() : '') + (hasMedia ? '\n\n' + mediaInstructions + '\nWhen recent_channel_context.questionReplyTo is present, it identifies the message the question directly replies to. Identify that message’s media before describing it. Never substitute another nearby emoji or sticker if the target is unavailable. Describe the observed action across supplied animation frames when asked what happens; sparse frames can establish visible motion without a claim to have watched every frame. Mention missing media only when it is relevant to the question, and avoid narrating transport or rendering diagnostics.' : '') + '\n\n' + responseStyleInstructions + '\n\n' + citationInstructions + '\n\n' + responseLanguageInstructions + '\n\n' + safetyInstructions;
       const turns: ChatCompletionMessageParam[] = modelMessages(messages);
       const budget = mediaBudget();
       const mediaDeadline = AbortSignal.any([deadline, AbortSignal.timeout(15_000)]);
@@ -61,6 +61,7 @@ export class OpenAICompatibleProvider implements ChatProvider {
         ] };
       }
       const background = context && !context.source ? [...(context.referencedMessages ?? []), ...context.recentMessages.slice().reverse()] : [];
+      if (context?.questionReplyTo) background.sort((a, b) => Number(b.id === context.questionReplyTo) - Number(a.id === context.questionReplyTo));
       const contextParts = [];
       if (this.#config.vision !== false) for (const message of background) {
         if (message.media?.length) contextParts.push({ type: 'text' as const, text: JSON.stringify({ context_message_id: message.id, author: message.author }) },

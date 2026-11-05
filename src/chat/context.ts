@@ -117,7 +117,9 @@ export async function loadChannelContext(questionAuthor: string, channelId: stri
       const value = fetched && contextMessage(fetched, channelId);
       if (value?.id === id) references.push(value);
     }
-    return channelContext(questionAuthor, recent.map(entry => entry.value), references);
+    return { ...channelContext(questionAuthor, recent.map(entry => entry.value), references),
+      ...(source.referenceId && idPattern.test(source.referenceId) && BigInt(source.referenceId) < BigInt(beforeId) ? { questionReplyTo: source.referenceId } : {}),
+    };
   } finally {
     clearTimeout(timeout);
     controller.abort();
