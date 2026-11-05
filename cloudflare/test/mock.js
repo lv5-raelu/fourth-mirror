@@ -35,8 +35,9 @@ export class MockDiscord extends DurableObject {
   async fetch(request) {
     const url = new URL(request.url);
     const path = url.pathname.replace(/^\/api\/v10/, '');
-    if (['cdn.discordapp.com', 'media.discordapp.net'].includes(url.hostname)) {
+    if (['cdn.discordapp.com', 'media.discordapp.net', 'gif.fxtwitter.com'].includes(url.hostname)) {
       this.record('media', { path, authorization: request.headers.get('Authorization') });
+      if (path.endsWith('.webp')) return new Response(Uint8Array.from(atob('UklGRuYAAABXRUJQVlA4WAoAAAACAAAAAQAAAAAAQU5JTQYAAAAAAP//AABBTk1GKAAAAAAAAAAAAAEAAAAAAGQAAAJWUDhMDwAAAC8BAAAABxD9j/4HIqL/AQBBTk1GKAAAAAAAAAAAAAAAAAAAAGQAAABWUDhMDwAAAC8AAAAAB9D/iP4HIqL/AQBBTk1GKgAAAAAAAAAAAAEAAAAAAGQAAAFWUDhMEQAAAC8BAAAADxDzv//zHw4yov8BAEFOTUYoAAAAAAAAAAAAAAAAAAAAZAAAAFZQOEwPAAAALwAAAAAH0P+I/gciov8BAA=='), char => char.charCodeAt(0)));
       if (path.endsWith('.json')) return Response.json({ v: '5.5.7', w: 32, h: 32, ip: 0, op: 20, fr: 10, layers: [{
         ty: 1, ind: 1, ip: 0, op: 20, sw: 8, sh: 8, sc: '#ff0000', ks: { o: { a: 0, k: 100 }, r: { a: 0, k: 0 },
           a: { a: 0, k: [0, 0, 0] }, s: { a: 0, k: [100, 100, 100] }, p: { a: 0, k: [8, 8, 0] } },
@@ -210,7 +211,7 @@ export class MockDiscord extends DurableObject {
 
 export default {
   fetch(request, env) {
-    if (!['discord.com', 'cdn.discordapp.com', 'media.discordapp.net', 'gateway.discord.gg', 'resume.discord.gg', 'ai.probe.invalid', 'web.probe.invalid', 'control.probe.invalid', 'hsr.gachabase.net'].includes(new URL(request.url).hostname)) {
+    if (!['discord.com', 'cdn.discordapp.com', 'media.discordapp.net', 'gif.fxtwitter.com', 'gateway.discord.gg', 'resume.discord.gg', 'ai.probe.invalid', 'web.probe.invalid', 'control.probe.invalid', 'hsr.gachabase.net'].includes(new URL(request.url).hostname)) {
       return new Response('External network disabled', { status: 403 });
     }
     return env.MOCK.getByName('services').fetch(request);

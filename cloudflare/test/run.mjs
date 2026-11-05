@@ -37,8 +37,9 @@ function bundle(entry, name) {
   return join(out, basename(entry).replace(/\.ts$/, '.js'));
 }
 function modules(path) {
-  return [basename(path), ...readdirSync(dirname(path)).filter(name => name !== basename(path) && name !== 'README.md' && /\.(js|md)$/.test(name))]
-    .map(name => ({ path: join(dirname(path), name), type: name.endsWith('.md') ? 'Text' : 'ESModule', contents: readFileSync(join(dirname(path), name), 'utf8') }));
+  return [basename(path), ...readdirSync(dirname(path)).filter(name => name !== basename(path) && name !== 'README.md' && /\.(js|md|wasm)$/.test(name))]
+    .map(name => ({ path: join(dirname(path), name), type: name.endsWith('.wasm') ? 'CompiledWasm' : name.endsWith('.md') ? 'Text' : 'ESModule',
+      contents: name.endsWith('.wasm') ? readFileSync(join(dirname(path), name)) : readFileSync(join(dirname(path), name), 'utf8') }));
 }
 async function eventually(check, label) {
   const deadline = Date.now() + 8_000;
@@ -210,6 +211,17 @@ try {
   assert.ok((await observations('model')).at(-1).body.messages.some(turn => Array.isArray(turn.content) && turn.content.some(part => part.type === 'image_url')));
   assert.ok((await observations('media')).every(call => call.authorization === null));
   pass('Workers process PNG, GIF, APNG, and Lottie media-only turns, preserve visual follow-ups, and store references only');
+
+  const animatedLink = message(visual, '<@123456789012345678> What happens in https://gif.fxtwitter.com/tweet_video/example.webp?', {
+    author: { id: nextId() }, mentions: [{ id: '123456789012345678' }],
+  });
+  await emit('MESSAGE_CREATE', animatedLink); await complete(animatedLink.id);
+  const animatedContent = (await observations('model')).at(-1).body.messages.at(-1).content;
+  assert.equal(animatedContent.filter(part => part.type === 'image_url').length, 4);
+  const sampledTimes = animatedContent.filter(part => part.type === 'text').slice(1).map(part => JSON.parse(part.text).time_ms);
+  assert.deepEqual(sampledTimes, [0, 100, 200, 300]);
+  assert.ok(!JSON.stringify(animatedContent).includes('unavailable'));
+  pass('Bundled WebP WASM decoder supplies ordered animation frames from FxTwitter links in Workers');
 
   const group = await createChat(nextId(), 'group', String(BigInt(permissions) & ~(1n << 36n) & ~2048n));
   assert.equal(group.mode, 'group');

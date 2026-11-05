@@ -80,6 +80,40 @@ test('visual turns retain speaker/language envelopes, context attribution, and i
   assert.equal(downloaded.length, 2);
 });
 
+test('the directly referenced sticker is prioritized over newer unrelated media when channel context exceeds the image budget', async t => {
+  const originalFetch = globalThis.fetch;
+  const bytes = await png(), downloaded: string[] = [];
+  t.mock.method(globalThis, 'fetch', (async (input, init) => {
+    if (String(input).startsWith('https://cdn.discordapp.com/')) {
+      downloaded.push(String(input)); return new Response(bytes);
+    }
+    return originalFetch(input, init);
+  }) as typeof fetch);
+  let payload: { messages: { role: string; content: unknown }[] } | undefined;
+  const baseUrl = await mockServer(t, (req, res) => {
+    const chunks: Buffer[] = [];
+    req.on('data', (chunk: Buffer) => chunks.push(chunk));
+    req.on('end', () => {
+      payload = JSON.parse(Buffer.concat(chunks).toString());
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ choices: [{ message: { content: 'The referenced character is waving.' } }] }));
+    });
+  });
+  const target = '503456789012345678';
+  const recentMessages = Array.from({ length: 8 }, (_, index) => ({
+    id: String(BigInt(target) + BigInt(index)), author: 'User', content: 'Media message',
+    media: [{ url: imageUrl + '?item=' + index, name: index === 0 ? 'Target sticker' : 'Unrelated emoji', kind: 'image' as const }],
+  }));
+  await new OpenAICompatibleProvider(settings(baseUrl), undefined, null).reply([{ role: 'user', content: 'What is this sticker?' }], {
+    questionAuthor: 'Rae', questionReplyTo: target, recentMessages,
+  });
+  assert.equal(downloaded[0], imageUrl + '?item=0');
+  assert.equal(downloaded.length, 6);
+  const content = payload!.messages[1]!.content as { type: string; text?: string }[];
+  assert.equal(JSON.parse(content[0]!.text!).recent_channel_context.questionReplyTo, target);
+  assert.ok(JSON.stringify(payload?.messages[0]).includes('Never substitute another nearby emoji or sticker'));
+});
+
 test('sends the configured endpoint, key, model, history, and token-limit field over HTTP', async (t) => {
   const received: { path: string | undefined; auth: string | undefined; body: Record<string, unknown> }[] = [];
   const baseUrl = await mockServer(t, (req, res) => {

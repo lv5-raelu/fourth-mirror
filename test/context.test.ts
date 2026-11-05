@@ -24,6 +24,7 @@ test('includes media-only history and the current question’s older direct repl
   assert.equal(context.recentMessages[0]?.content, 'Media message');
   assert.equal(context.recentMessages[0]?.media?.[0]?.url, imageUrl);
   assert.equal(context.referencedMessages?.[0]?.media?.[0]?.name, 'Sticker: Wave');
+  assert.equal(context.questionReplyTo, target.id);
 });
 
 test('channel context keeps recent messages in reading order with bounded text and author labels', () => {

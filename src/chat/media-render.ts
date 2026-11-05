@@ -2,49 +2,19 @@ import { Buffer } from 'node:buffer';
 import { inflateSync } from 'node:zlib';
 import { GifReader } from 'omggif';
 import UPNG from 'upng-js';
-import { encodePNG, ImageSurface, parse } from 'lottie.js';
-
-const MAX_ANIMATION_PIXELS = 8_000_000;
-const MAX_ANIMATION_FRAMES = 120;
+import { ImageSurface, parse } from 'lottie.js';
+import { webpFrames } from './media-webp.ts';
+import { checkAnimation, clearRect, compositePixels, pngFrame, sampleFrames } from './media-raster.ts';
+import type { FrameRect, MediaFrame } from './media-raster.ts';
+export { sampleFrames } from './media-raster.ts';
+export type { MediaFrame } from './media-raster.ts';
 
 // UPNG 2.1.0 exposes its inflater. Bound output before it can allocate arbitrary
 // memory from a small compressed stream; this also works in nodejs_compat Workers.
 (UPNG.decode as typeof UPNG.decode & { _inflate: (data: Uint8Array) => Uint8Array })._inflate =
   data => inflateSync(data, { maxOutputLength: 16 * 1024 * 1024 });
 
-export interface MediaFrame { data: Uint8Array; mime: string; timeMs?: number }
-
-export function sampleFrames(delays: readonly number[], count: number): number[] {
-  if (!delays.length) return [];
-  const total = delays.reduce((sum, delay) => sum + delay, 0);
-  const selected = new Set<number>();
-  for (let sample = 0; sample < Math.min(count, delays.length); sample++) {
-    const target = total * sample / Math.max(1, Math.min(count, delays.length) - 1);
-    let end = 0;
-    const index = delays.findIndex(delay => { end += delay; return end > target; });
-    selected.add(index < 0 ? delays.length - 1 : index);
-  }
-  return [...selected];
-}
-
-function checkAnimation(width: number, height: number, frames: number): void {
-  if (![width, height, frames].every(value => Number.isSafeInteger(value) && value > 0) ||
-    frames > MAX_ANIMATION_FRAMES || width * height * frames > MAX_ANIMATION_PIXELS) throw new Error('Animation exceeds decoding limits');
-}
-
-async function pngFrame(pixels: Uint8Array | Uint8ClampedArray, width: number, height: number, timeMs: number): Promise<MediaFrame> {
-  // Downsample animation frames to at most 512px. Screenshots keep their original bytes.
-  const scale = Math.min(1, 512 / Math.max(width, height));
-  const w = Math.max(1, Math.round(width * scale)), h = Math.max(1, Math.round(height * scale));
-  const output = new Uint8Array(w * h * 4);
-  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-    const source = (Math.min(height - 1, Math.floor(y / scale)) * width + Math.min(width - 1, Math.floor(x / scale))) * 4;
-    output.set(pixels.subarray(source, source + 4), (y * w + x) * 4);
-  }
-  return { data: await encodePNG(output, w, h), mime: 'image/png', timeMs };
-}
-
-async function gifFrames(data: Uint8Array, count: number): Promise<MediaFrame[]> {
+async function gifFrames(data: Uint8Array, count: number, signal?: AbortSignal): Promise<MediaFrame[]> {
   // Count frames before GifReader allocates an object for each one.
   if (data.length < 13) throw new Error('Invalid GIF');
   const width = data[6]! | data[7]! << 8, height = data[8]! | data[9]! << 8;
@@ -86,6 +56,7 @@ async function gifFrames(data: Uint8Array, count: number): Promise<MediaFrame[]>
   let time = 0;
   const output: MediaFrame[] = [];
   for (const [index, frame] of info.entries()) {
+    signal?.throwIfAborted();
     const previous = frame.disposal === 3 ? canvas.slice() : undefined;
     gif.decodeAndBlitFrameRGBA(index, canvas);
     if (selected.has(index)) output.push(await pngFrame(canvas, gif.width, gif.height, time));
@@ -97,44 +68,81 @@ async function gifFrames(data: Uint8Array, count: number): Promise<MediaFrame[]>
   return output;
 }
 
-async function apngFrames(data: Uint8Array, count: number): Promise<MediaFrame[] | undefined> {
+const crcTable = Array.from({ length: 256 }, (_, index) => {
+  let value = index;
+  for (let bit = 0; bit < 8; bit++) value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+  return value >>> 0;
+});
+
+function pngChunk(type: string, data: Buffer = Buffer.alloc(0)): Buffer {
+  const chunk = Buffer.alloc(data.length + 12);
+  chunk.writeUInt32BE(data.length); chunk.write(type, 4); chunk.set(data, 8);
+  let crc = 0xffffffff;
+  for (const byte of chunk.subarray(4, data.length + 8)) crc = crcTable[(crc ^ byte) & 255]! ^ (crc >>> 8);
+  chunk.writeUInt32BE((crc ^ 0xffffffff) >>> 0, data.length + 8);
+  return chunk;
+}
+
+async function apngFrames(data: Uint8Array, count: number, signal?: AbortSignal): Promise<MediaFrame[] | undefined> {
   const bytes = Buffer.from(data);
   let frameCount: number | undefined;
-  let actualFrames = 0;
-  const chunks = [bytes.subarray(0, 8)];
+  const frames: { rect: FrameRect; delay: number; dispose: number; blend: boolean; parts: Buffer[] }[] = [];
+  const shared: Buffer[] = [];
+  let chunkCount = 0, ended = false;
+  const width = bytes.readUInt32BE(16), height = bytes.readUInt32BE(20);
   for (let offset = 8; offset + 12 <= bytes.length;) {
     const length = bytes.readUInt32BE(offset), type = bytes.toString('ascii', offset + 4, offset + 8);
-    if (offset + length + 12 > bytes.length) throw new Error('Invalid PNG chunk');
+    if (++chunkCount > 4096 || offset + length + 12 > bytes.length) throw new Error('Invalid PNG chunk');
     if ((offset === 8 && type !== 'IHDR') || (type === 'IHDR' && (offset !== 8 || length !== 13))) throw new Error('Invalid PNG header');
     if (type === 'acTL') {
-      if (length !== 8 || frameCount !== undefined || actualFrames) throw new Error('Invalid APNG');
+      if (length !== 8 || frameCount !== undefined || frames.length) throw new Error('Invalid APNG');
       const declaredFrames: number = bytes.readUInt32BE(offset + 8);
-      checkAnimation(bytes.readUInt32BE(16), bytes.readUInt32BE(20), declaredFrames);
+      checkAnimation(width, height, declaredFrames);
       frameCount = declaredFrames;
     }
     if (type === 'fcTL') {
       if (length !== 26) throw new Error('Invalid APNG frame');
-      actualFrames++;
-      if (frameCount === undefined || actualFrames > frameCount) throw new Error('Invalid APNG frame count');
-      const width = bytes.readUInt32BE(offset + 12), height = bytes.readUInt32BE(offset + 16);
-      const x = bytes.readUInt32BE(offset + 20), y = bytes.readUInt32BE(offset + 24);
-      if (!width || !height || x + width > bytes.readUInt32BE(16) || y + height > bytes.readUInt32BE(20)) throw new Error('Invalid APNG bounds');
-      if (bytes[offset + 32]! > 2 || bytes[offset + 33]! > 1) throw new Error('Invalid APNG composition');
+      if (frameCount === undefined || frames.length >= frameCount) throw new Error('Invalid APNG frame count');
+      const rect = { width: bytes.readUInt32BE(offset + 12), height: bytes.readUInt32BE(offset + 16), x: bytes.readUInt32BE(offset + 20), y: bytes.readUInt32BE(offset + 24) };
+      if (!rect.width || !rect.height || rect.x + rect.width > width || rect.y + rect.height > height) throw new Error('Invalid APNG bounds');
+      const dispose = bytes[offset + 32]!, blend = bytes[offset + 33]!;
+      if (dispose > 2 || blend > 1) throw new Error('Invalid APNG composition');
+      const delay = bytes.readUInt16BE(offset + 28) * 1000 / (bytes.readUInt16BE(offset + 30) || 100);
+      frames.push({ rect, delay: Math.max(20, Math.round(delay)), dispose, blend: Boolean(blend), parts: [] });
     }
-    // Ignore metadata. The decoder's text parsing is unnecessary for visual input.
-    if (['IHDR', 'PLTE', 'tRNS', 'IDAT', 'IEND', 'acTL', 'fcTL', 'fdAT'].includes(type)) chunks.push(bytes.subarray(offset, offset + length + 12));
-    if (chunks.length > 4096) throw new Error('Too many PNG chunks');
+    if (type === 'PLTE' || type === 'tRNS') shared.push(bytes.subarray(offset, offset + length + 12));
+    if (type === 'IDAT' && frames.length) frames.at(-1)!.parts.push(bytes.subarray(offset + 8, offset + 8 + length));
+    if (type === 'fdAT') {
+      if (!frames.length || length < 4) throw new Error('Invalid APNG frame data');
+      frames.at(-1)!.parts.push(bytes.subarray(offset + 12, offset + 8 + length));
+    }
     offset += length + 12;
-    if (type === 'IEND') break;
+    if (type === 'IEND') { ended = true; break; }
   }
   if (frameCount === undefined) return undefined;
-  if (frameCount !== actualFrames) throw new Error('Invalid APNG frame count');
-  checkAnimation(bytes.readUInt32BE(16), bytes.readUInt32BE(20), frameCount);
-  const image = UPNG.decode(new Uint8Array(Buffer.concat(chunks)).buffer);
-  const rgba = UPNG.toRGBA8(image);
-  const delays = image.frames.map(frame => Math.max(20, frame.delay));
-  return Promise.all(sampleFrames(delays, count).map(index => pngFrame(new Uint8Array(rgba[index]!), image.width, image.height,
-    delays.slice(0, index).reduce((sum, delay) => sum + delay, 0))));
+  if (!ended || frameCount !== frames.length) throw new Error('Invalid APNG frame count');
+  const selected = new Set(sampleFrames(frames.map(frame => frame.delay), count));
+  let canvas = new Uint8Array(width * height * 4), time = 0;
+  const output: MediaFrame[] = [];
+  // Decode one frame at a time. A five-second sticker no longer requires keeping
+  // hundreds of full RGBA images in memory before choosing four samples.
+  for (const [index, frame] of frames.entries()) {
+    signal?.throwIfAborted();
+    if (!frame.parts.length) throw new Error('Missing APNG frame pixels');
+    const header = Buffer.from(bytes.subarray(16, 29));
+    header.writeUInt32BE(frame.rect.width); header.writeUInt32BE(frame.rect.height, 4);
+    const standalone = Buffer.concat([bytes.subarray(0, 8), pngChunk('IHDR', header), ...shared,
+      ...frame.parts.map(part => pngChunk('IDAT', part)), pngChunk('IEND')]);
+    const image = UPNG.decode(new Uint8Array(standalone).buffer);
+    const patch = new Uint8Array(UPNG.toRGBA8(image)[0]!);
+    const previous = frame.dispose === 2 ? canvas.slice() : undefined;
+    compositePixels(canvas, width, patch, frame.rect, frame.blend);
+    if (selected.has(index)) output.push(await pngFrame(canvas, width, height, time));
+    if (frame.dispose === 1) clearRect(canvas, width, frame.rect);
+    else if (previous) canvas = previous;
+    time += frame.delay;
+  }
+  return output;
 }
 
 async function lottieFrames(data: Uint8Array, count: number): Promise<MediaFrame[]> {
@@ -168,19 +176,17 @@ async function lottieFrames(data: Uint8Array, count: number): Promise<MediaFrame
   } finally { surface.dispose(); }
 }
 
-async function render(data: Uint8Array, kind: 'image' | 'lottie' | 'preview', count: number): Promise<MediaFrame[]> {
+async function render(data: Uint8Array, kind: 'image' | 'lottie' | 'preview', count: number, signal?: AbortSignal): Promise<MediaFrame[]> {
   if (kind === 'lottie') return lottieFrames(data, count);
   const bytes = Buffer.from(data);
-  if (bytes.subarray(0, 6).toString('ascii').match(/^GIF8[79]a$/)) return gifFrames(data, count);
+  if (bytes.subarray(0, 6).toString('ascii').match(/^GIF8[79]a$/)) return gifFrames(data, count, signal);
   if (bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) {
     if (bytes.length < 33) throw new Error('Invalid PNG');
-    return await apngFrames(data, count) ?? [{ data, mime: 'image/png' }];
+    return await apngFrames(data, count, signal) ?? [{ data, mime: 'image/png' }];
   }
   if (bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255) return [{ data, mime: 'image/jpeg' }];
   if (bytes.toString('ascii', 0, 4) === 'RIFF' && bytes.toString('ascii', 8, 12) === 'WEBP') {
-    // Animated WebP needs a separate decoder. Never describe a single frame as a loop.
-    if (bytes[15] === 88 && (bytes[20]! & 2)) throw new Error('Animated WebP unsupported');
-    return [{ data, mime: 'image/webp' }];
+    return await webpFrames(data, count, signal) ?? [{ data, mime: 'image/webp' }];
   }
   throw new Error('Unsupported media bytes');
 }
@@ -191,7 +197,7 @@ export async function renderMedia(data: Uint8Array, kind: 'image' | 'lottie' | '
   // Avoid retaining several decoded animation canvases at once in a 128 MiB Worker.
   const operation = rendering.then(() => {
     signal?.throwIfAborted();
-    return render(data, kind, count);
+    return render(data, kind, count, signal);
   });
   rendering = operation.then(() => {}, () => {});
   return operation;

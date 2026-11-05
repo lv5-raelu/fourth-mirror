@@ -9,7 +9,8 @@ export interface ChatMessage {
 export interface ChatMedia {
   readonly url: string;
   readonly name: string;
-  readonly kind: 'image' | 'lottie' | 'preview';
+  readonly kind: 'image' | 'lottie' | 'preview' | 'gif-page';
+  readonly previewUrl?: string;
 }
 
 export type ChatMode = 'personal' | 'group';
@@ -24,6 +25,7 @@ export interface ChatContextMessage {
 
 export interface ChatContext {
   readonly questionAuthor: string;
+  readonly questionReplyTo?: string;
   readonly recentMessages: readonly ChatContextMessage[];
   readonly referencedMessages?: readonly ChatContextMessage[];
   readonly source?: SourceContext;

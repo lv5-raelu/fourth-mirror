@@ -29,6 +29,7 @@
     "commands:deploy": "node --env-file-if-exists=.env src/scripts/deploy-commands.ts"
   },
   "dependencies": {
+    "@jsquash/webp": "1.5.0",
     "devalue": "6.0.3",
     "discord.js": "^14.27.0",
     "lottie.js": "0.6.0",
