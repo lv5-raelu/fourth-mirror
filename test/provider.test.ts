@@ -114,6 +114,36 @@ test('the directly referenced sticker is prioritized over newer unrelated media 
   assert.ok(JSON.stringify(payload?.messages[0]).includes('Never substitute another nearby emoji or sticker'));
 });
 
+test('recent analogies reach provider tool rounds and keep direct game questions answerable', async t => {
+  const requests: { messages: { role: string; content: string }[] }[] = [];
+  const baseUrl = await mockServer(t, (req, res) => {
+    const chunks: Buffer[] = [];
+    req.on('data', (chunk: Buffer) => chunks.push(chunk));
+    req.on('end', () => {
+      requests.push(JSON.parse(Buffer.concat(chunks).toString()));
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ choices: [{ message: requests.length === 1
+        ? { role: 'assistant', content: null, tool_calls: [{ id: 'variety-lookup', type: 'function', function: { name: 'lore_search', arguments: '{"query":"Synesthesia Beacon"}' } }] }
+        : { role: 'assistant', content: 'Skill Points are a shared combat resource.' } }] }));
+    });
+  });
+  const provider = new OpenAICompatibleProvider(settings(baseUrl));
+  const answer = await provider.reply([
+    { role: 'assistant', content: 'Treat your attention like Skill Points.' },
+    { role: 'user', content: 'Explain Skill Points themselves.' },
+  ]);
+  assert.equal(answer, 'Skill Points are a shared combat resource.');
+  assert.equal(requests.length, 2);
+  for (const request of requests) {
+    const latest = request.messages.find(message => message.role === 'user' && message.content.includes('Explain Skill Points themselves.'))!;
+    assert.deepEqual(JSON.parse(latest.content).recent_analogy_references, ['Skill Points and resource-pool comparisons']);
+  }
+  await provider.reply([{ role: 'user', content: 'Plain advice please.' }], { questionAuthor: 'Rae', recentMessages: [
+    { author: 'User', content: 'Curios.' }, { author: 'Fourth Mirror', content: 'A Simulated Universe trial.', isOwnReply: true },
+  ] });
+  assert.deepEqual(JSON.parse(requests[2]!.messages.at(-1)!.content).recent_analogy_references, ['Simulated Universe experiments']);
+});
+
 test('sends the configured endpoint, key, model, history, and token-limit field over HTTP', async (t) => {
   const received: { path: string | undefined; auth: string | undefined; body: Record<string, unknown> }[] = [];
   const baseUrl = await mockServer(t, (req, res) => {

@@ -19,6 +19,8 @@ export interface ChatContextMessage {
   readonly id?: string;
   readonly author: string;
   readonly content: string;
+  /** Set by the Discord context loader from the bot's actual author ID, never its display name. */
+  readonly isOwnReply?: true;
   readonly replyTo?: string;
   readonly media?: readonly ChatMedia[];
 }

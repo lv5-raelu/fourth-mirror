@@ -72,6 +72,7 @@ export async function handleChatMessage(message: Message, context: BotContext): 
       media,
       onStart,
       context: () => loadChannelContext(message.member?.displayName || message.author.displayName, message.channelId, message.id, {
+        botId: botId!,
         ...(message.reference?.messageId && (message.reference.type ?? 0) === 0 && (message.reference.channelId ?? message.channelId) === message.channelId
           ? { referenceId: message.reference.messageId } : {}),
         // Raw REST reads avoid populating Discord.js's message cache with fetched context.

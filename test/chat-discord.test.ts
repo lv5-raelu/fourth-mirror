@@ -275,7 +275,7 @@ test('channel mentions answer in place with recent context, while ordinary repli
     reads.push({ route, ...(options.query ? { before: options.query.get('before'), limit: options.query.get('limit') } : {}) });
     if (!options.query) return { id: '901456789012345678', channel_id: channelId, content: 'The original schedule.', author: { username: 'Organizer' } };
     return [
-      { id: '903456789012345678', content: 'That sounds useful.', author: { global_name: 'Pat' } },
+      { id: '903456789012345678', content: 'That sounds useful.', author: { id: botId, global_name: 'Fourth Mirror' } },
       { id: '902456789012345678', content: 'The event starts at noon.', author: { username: 'Alex' },
         message_reference: { message_id: '901456789012345678', channel_id: channelId } },
     ];
@@ -302,7 +302,7 @@ test('channel mentions answer in place with recent context, while ordinary repli
     { route: '/channels/' + channelId + '/messages/901456789012345678' }]);
   assert.deepEqual(contexts[0], { questionAuthor: 'Rae', recentMessages: [
     { id: '902456789012345678', author: 'Alex', content: 'The event starts at noon.', replyTo: '901456789012345678' },
-    { id: '903456789012345678', author: 'Pat', content: 'That sounds useful.' },
+    { id: '903456789012345678', author: 'Fourth Mirror', content: 'That sounds useful.', isOwnReply: true },
   ], referencedMessages: [{ id: '901456789012345678', author: 'Organizer', content: 'The original schedule.' }] });
   assert.equal(service.getSession(channelId), undefined);
   assert.ok(sent.every(payload => payload.reply?.messageReference === base.id && payload.flags === MessageFlags.SuppressEmbeds && payload.allowedMentions.parse.length === 0 && !payload.allowedMentions.repliedUser));
