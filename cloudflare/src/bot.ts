@@ -290,6 +290,7 @@ export class DiscordBot extends DurableObject<Env> {
         media,
         onStart,
         context: () => loadChannelContext(speakerName, message.channel_id, message.id, {
+          botId: this.config.applicationId,
           ...(sameThreadReply(message) ? { referenceId: sameThreadReply(message)! } : {}),
           recent: (limit, signal) => this.rest.request<DiscordContextMessage[]>('GET', `/channels/${message.channel_id}/messages`, undefined,
             { deadlineMs: Math.min(CONTEXT_TIMEOUT_MS, remaining()), query: { before: message.id, limit }, signal }),

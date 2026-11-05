@@ -14,6 +14,20 @@ const reply = (value: number, target: number): DiscordContextMessage => ({ ...me
   message_reference: { message_id: id(target), channel_id: channelId },
 });
 
+test('own replies are identified by the configured Discord author ID, excluding impersonators and webhooks', async () => {
+  const botId = '123456789012345678';
+  const context = await loadChannelContext('Rae', channelId, questionId, {
+    botId,
+    recent: async () => [
+      { ...message(3, 'Skill Points.'), author: { id: botId, username: 'Renamed bot' } },
+      { ...message(2, 'IPC.'), author: { id: '223456789012345678', username: 'Fourth Mirror' } },
+      { ...message(1, 'Curios.'), author: { id: botId }, webhook_id: 'webhook' },
+    ],
+    message: async () => { throw new Error('No references expected'); },
+  });
+  assert.deepEqual(context.recentMessages.map(message => message.isOwnReply), [undefined, undefined, true]);
+});
+
 test('includes media-only history and the current question’s older direct reply target', async () => {
   const target = { ...message(1, ''), sticker_items: [{ id: '123456789012345678', name: 'Wave', format_type: 1 }] };
   const context = await loadChannelContext('Rae', channelId, questionId, {

@@ -341,6 +341,18 @@ try {
   const referenceLookups = (await observations('reference')).slice(referencesBeforeContext);
   assert.deepEqual(referenceLookups.map(value => value.path), [contextId(30), contextId(15), contextId(12)].map(id => '/channels/' + parent + '/messages/' + id));
   assert.deepEqual(await history(), storedBeforeMention);
+  await control({ contextMessages: [
+    { id: nextId(), type: 0, author: { id: botId, username: 'Fourth Mirror' }, content: 'Treat your time like shared Skill Points.' },
+    { id: nextId(), type: 0, author: { id: nextId(), username: 'Fourth Mirror' }, content: 'A Curio catalogue.' },
+  ], contextTargets: {} });
+  const varietyMention = { ...mention, id: nextId(), author: { id: nextId() }, content: '<@' + botId + '> How should I prioritize my tasks?' };
+  await emit('MESSAGE_CREATE', varietyMention); await complete(varietyMention.id);
+  const varietyCall = (await observations('model')).at(-1).body.messages;
+  assert.deepEqual(JSON.parse(varietyCall.at(-1).content).recent_analogy_references, ['Skill Points and resource-pool comparisons']);
+  const varietyBackground = JSON.parse(varietyCall.at(-2).content).recent_channel_context.recentMessages;
+  assert.equal(varietyBackground.filter(message => message.isOwnReply).length, 1);
+  assert.deepEqual(await history(), storedBeforeMention);
+  pass('One-off analogy reminders recognize only this bot’s recent replies without storing background or trusting display names');
   await control({ contextMessages: null, contextTargets: {} });
   pass('A 30-message window includes unique direct reply targets, preserves relationships, reuses embedded messages, and skips chains, deleted targets, and other channels');
 

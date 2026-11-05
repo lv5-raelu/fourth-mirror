@@ -16,7 +16,8 @@ export interface DiscordContextMessage extends DiscordMediaMessage {
   readonly channel_id?: string;
   readonly content: string;
   readonly type?: number;
-  readonly author: { readonly username?: string; readonly global_name?: string | null };
+  readonly author: { readonly id?: string; readonly username?: string; readonly global_name?: string | null };
+  readonly webhook_id?: string;
   readonly member?: { readonly nick?: string | null };
   readonly message_reference?: { readonly type?: number; readonly message_id?: string; readonly channel_id?: string };
   readonly referenced_message?: DiscordContextMessage | null;
@@ -24,6 +25,7 @@ export interface DiscordContextMessage extends DiscordMediaMessage {
 
 interface ContextSource {
   readonly referenceId?: string;
+  readonly botId?: string;
   recent(limit: number, signal: AbortSignal): Promise<readonly DiscordContextMessage[]>;
   message(id: string, signal: AbortSignal): Promise<DiscordContextMessage>;
 }
@@ -65,7 +67,7 @@ export function channelContext(questionAuthor: string, newestFirst: readonly Cha
   };
 }
 
-function contextMessage(message: DiscordContextMessage, channelId: string): ChatContextMessage | undefined {
+function contextMessage(message: DiscordContextMessage, channelId: string, botId?: string): ChatContextMessage | undefined {
   if (!idPattern.test(message.id) || (message.channel_id && message.channel_id !== channelId) ||
     ![0, 19].includes(message.type ?? 0) || typeof message.content !== 'string') return undefined;
   const media = collectDiscordMedia(message, false);
@@ -73,6 +75,7 @@ function contextMessage(message: DiscordContextMessage, channelId: string): Chat
   const reference = message.message_reference;
   const replyTo = reference?.message_id;
   return { id: message.id, author: message.member?.nick || message.author?.global_name || message.author?.username || 'User', content: message.content,
+    ...(botId && message.author?.id === botId && !message.webhook_id ? { isOwnReply: true as const } : {}),
     ...(media.length ? { media } : {}),
     ...(replyTo && idPattern.test(replyTo) && BigInt(replyTo) < BigInt(message.id) && (reference.type ?? 0) === 0 &&
       (reference.channel_id ?? channelId) === channelId ? { replyTo } : {}),
@@ -90,7 +93,7 @@ export async function loadChannelContext(questionAuthor: string, channelId: stri
   };
   try {
     const raw = await read(() => source.recent(MAX_CONTEXT_MESSAGES, signal)) ?? [];
-    const recent = raw.slice(0, MAX_CONTEXT_MESSAGES).map(message => ({ raw: message, value: contextMessage(message, channelId) }))
+    const recent = raw.slice(0, MAX_CONTEXT_MESSAGES).map(message => ({ raw: message, value: contextMessage(message, channelId, source.botId) }))
       .filter((entry): entry is { raw: DiscordContextMessage; value: ChatContextMessage } => Boolean(entry.value && BigInt(entry.value.id!) < BigInt(beforeId)));
     const known = new Set(recent.map(entry => entry.value.id));
     const targets = new Map<string, { embedded?: ChatContextMessage; deleted: boolean }>();
@@ -103,7 +106,7 @@ export async function loadChannelContext(questionAuthor: string, channelId: stri
       if (!id || known.has(id)) continue;
       const target = targets.get(id) ?? { deleted: false };
       if (message.referenced_message) {
-        const embedded = contextMessage(message.referenced_message, channelId);
+        const embedded = contextMessage(message.referenced_message, channelId, source.botId);
         if (embedded?.id === id) target.embedded = embedded;
       } else if (message.referenced_message === null) target.deleted = true;
       targets.set(id, target);
@@ -114,7 +117,7 @@ export async function loadChannelContext(questionAuthor: string, channelId: stri
       if (target.embedded) { references.push(target.embedded); continue; }
       if (target.deleted || signal.aborted) continue;
       const fetched = await read(() => source.message(id, signal));
-      const value = fetched && contextMessage(fetched, channelId);
+      const value = fetched && contextMessage(fetched, channelId, source.botId);
       if (value?.id === id) references.push(value);
     }
     return { ...channelContext(questionAuthor, recent.map(entry => entry.value), references),
