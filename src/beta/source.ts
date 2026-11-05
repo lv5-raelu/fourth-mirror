@@ -2,17 +2,22 @@ import { unflatten } from 'devalue';
 import { ChatError } from '../chat/types.ts';
 import type { SourceContext } from '../chat/types.ts';
 import type { BetaEntity, BetaFeed, BetaRevision } from './types.ts';
+import { plainText } from './text.ts';
+import { detailSections } from './details.ts';
 
 export const BETA_ORIGIN = 'https://hsr.gachabase.net';
 export const BETA_URL = BETA_ORIGIN + '/changelog/beta?lang=en';
 const CACHE_MS = 5 * 60_000;
 const categories = { characters: 'Characters', lightcones: 'Light Cones', relics: 'Cavern Relics', planarOrnaments: 'Planar Ornaments', items: 'Items' };
-const versionPattern = /^\d+\.\d+\.\d+$/;
+const versionPattern = /^\d{1,3}\.\d{1,3}\.\d{1,3}$/;
 const record = (value: unknown): Record<string, unknown> | undefined => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 const number = (value: unknown): number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : -1;
 
-export function plainText(value: string): string {
-  return value.replace(/<\/?[a-z][^>]*>/gi, '').replace(/\\n/g, '\n').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").trim();
+export function entitySourceUrl(entity: BetaEntity, revision?: BetaRevision): string {
+  const target = new URL(entity.diffUrl ?? entity.url);
+  // New entries have no diff URL. Pin old controls to the original kit.
+  if (!entity.diffUrl && revision && /\/beta$/.test(target.pathname)) target.pathname += `/${revision.version}/${revision.revision}`;
+  return target.href;
 }
 
 function sourceUrl(value: unknown): string | undefined {
@@ -63,7 +68,9 @@ export function parseFeed(body: string, checkedAt: number): BetaFeed {
         const url = sourceUrl(entity?.href), diffUrl = sourceUrl(entity?.diff);
         const text = typeof name?.override === 'string' && name.override ? name.override : name?.text;
         if (!entity || number(entity.id) < 0 || typeof text !== 'string' || !url || !['new', 'updated', 'removed'].includes(String(entity.status))) continue;
-        entities.push({ id: entity.id as number, name: plainText(text).slice(0, 120), category, status: String(entity.status), url, ...(diffUrl ? { diffUrl } : {}) });
+        const displayName = plainText(text).slice(0, 120);
+        if (!displayName) continue;
+        entities.push({ id: entity.id as number, name: displayName, category, status: String(entity.status), url, ...(diffUrl ? { diffUrl } : {}) });
       }
     }
     const publishedAt = number(revision.design_timestamp);
@@ -81,7 +88,7 @@ function flattenDetails(value: unknown, prefix = '', result = new Map<string, st
   if (result.size > 5_000 || depth > 14) return result;
   if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
     const text = typeof value === 'string' ? plainText(value) : String(value);
-    if (text) result.set(prefix, text.slice(0, 1_000));
+    if (text) result.set(prefix, text);
   } else if (Array.isArray(value)) {
     value.slice(0, 150).forEach((item, index) => flattenDetails(item, `${prefix}[${number(record(item)?.id) >= 0 ? 'id=' + record(item)!.id : index}]`, result, depth + 1));
   } else if (record(value)) {
@@ -93,14 +100,16 @@ function flattenDetails(value: unknown, prefix = '', result = new Map<string, st
   return result;
 }
 
-export function parseDetails(body: string): { from: unknown; to: unknown; changes: { field: string; before: string | null; after: string | null }[]; current: { field: string; value: string }[] } {
+export function parseDetails(body: string) {
   const data = decodePage(body).map(value => record(value.data)).find(value => record(value?.target)?.dto || value?.dto || value?.id);
   if (!data) throw new Error('Missing beta entity data.');
-  const before = flattenDetails(record(data.source)?.dto);
-  const after = flattenDetails(record(data.target)?.dto ?? data.dto ?? data);
+  const beforeDto = record(data.source)?.dto;
+  const afterDto = record(data.target)?.dto ?? data.dto ?? data;
+  const before = flattenDetails(beforeDto);
+  const after = flattenDetails(afterDto);
   if (!after.size) throw new Error('Missing beta entity details.');
   const changes = [...new Set([...before.keys(), ...after.keys()])].filter(key => before.get(key) !== after.get(key))
-    .slice(0, 100).map(field => ({ field, before: before.get(field) ?? null, after: after.get(field) ?? null }));
+    .map(field => ({ field, before: before.get(field) ?? null, after: after.get(field) ?? null }));
   const identity = (value: unknown): unknown => {
     const ident = record(value);
     if (!ident) return null;
@@ -108,6 +117,7 @@ export function parseDetails(body: string): { from: unknown; to: unknown; change
     return { version: ident.version, revision: ident.revision, branch: ident.branch };
   };
   return { from: identity(data.sourceIdent), to: identity(data.targetIdent), changes: before.size ? changes : [],
+    sections: detailSections(beforeDto, afterDto, before.size ? changes : [], before.size > 0),
     current: [...after].slice(0, 120).map(([field, value]) => ({ field, value })) };
 }
 
@@ -141,6 +151,19 @@ export class BetaClient {
       }
       return body + decoder.decode();
     } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
+  }
+
+  async entityDetails(entity: BetaEntity, revision?: BetaRevision, signal?: AbortSignal): Promise<ReturnType<typeof parseDetails>> {
+    const url = entitySourceUrl(entity, revision);
+    let cached = this.details.get(url);
+    if (!cached || this.now() - cached.at > CACHE_MS) {
+      const promise = this.data(url, signal).then(parseDetails);
+      cached = { at: this.now(), promise };
+      this.details.set(url, cached);
+      if (this.details.size > 30) this.details.delete(this.details.keys().next().value!);
+      void promise.catch(() => { if (this.details.get(url)?.promise === promise) this.details.delete(url); });
+    }
+    return cached.promise;
   }
 
   async feed(force = false, signal?: AbortSignal): Promise<BetaFeed> {
@@ -183,16 +206,10 @@ export class BetaClient {
     const details = await Promise.all(matches.map(async entity => {
       const url = entity.diffUrl ?? entity.url;
       try {
-        let cached = this.details.get(url);
-        if (!cached || this.now() - cached.at > CACHE_MS) {
-          const promise = this.data(url, signal).then(parseDetails);
-          cached = { at: this.now(), promise };
-          this.details.set(url, cached);
-          if (this.details.size > 30) this.details.delete(this.details.keys().next().value!);
-          void promise.catch(() => this.details.delete(url));
-        }
-        const parsed = await cached.promise;
-        const compact = { name: entity.name, url, from: parsed.from, to: parsed.to, changes: parsed.changes.slice(0, 40), current: parsed.current.slice(0, 40) };
+        const parsed = await this.entityDetails(entity, undefined, signal);
+        const compact = { name: entity.name, url, from: parsed.from, to: parsed.to,
+          changes: parsed.changes.slice(0, 40).map(change => ({ ...change, before: change.before?.slice(0, 1_000) ?? null, after: change.after?.slice(0, 1_000) ?? null })),
+          current: parsed.current.slice(0, 40).map(field => ({ ...field, value: field.value.slice(0, 1_000) })) };
         while (JSON.stringify(compact).length > 8_000 && compact.current.length) compact.current.pop();
         while (JSON.stringify(compact).length > 8_000 && compact.changes.length > 1) compact.changes.pop();
         return compact;

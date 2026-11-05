@@ -133,7 +133,7 @@ test('notification permissions respect channel role and member overwrites', () =
   assert.equal(betaChannelPermissions(guild, bot, [role], roles, [{ id: guild, type: 0, deny: '2048', allow: '0' }, { id: bot, type: 1, allow: '2048', deny: '0' }]), true);
 });
 
-test('latest embeds stay within Discord limits and expose source comparisons without automatic mentions', () => {
+test('latest embeds stay within Discord limits and expose selectors without automatic mentions', () => {
   const feed = parseFeed(feedBody(), 100_000);
   const entry = feed.revisions[0]!.entities[0]!;
   feed.revisions[0]!.entities = Array.from({ length: 100 }, (_, index) => ({ ...entry, id: index, name: '@everyone ' + 'x'.repeat(110) }));
@@ -142,5 +142,6 @@ test('latest embeds stay within Discord limits and expose source comparisons wit
   assert.ok(embed.fields!.every(field => field.value.length <= 1024));
   assert.ok(JSON.stringify(embed).length < 6_000);
   assert.ok(!JSON.stringify(embed).includes('@everyone'));
-  assert.match(embed.fields![2]!.value, /https:\/\/hsr.gachabase.net/);
+  assert.ok(message.components!.some(row => row.components.some(component => component.type === 3 && component.options.length <= 25)));
+  assert.ok(message.components!.some(row => row.components.some(component => component.type === 2 && component.style === 5 && component.url.startsWith('https://hsr.gachabase.net/'))));
 });

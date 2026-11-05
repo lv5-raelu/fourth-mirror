@@ -55,5 +55,14 @@ export interface BetaEmbed {
 export interface BetaMessage {
   content?: string;
   embeds: BetaEmbed[];
-  components?: { type: 1; components: { type: 2; style: 5; label: string; url: string }[] }[];
+  components?: BetaRow[];
 }
+
+export type BetaButton = { type: 2; style: 5; label: string; url: string }
+  | { type: 2; style: 1 | 2; label: string; custom_id: string; disabled?: boolean };
+export type BetaRow = { type: 1; components: BetaButton[] }
+  | { type: 1; components: [{ type: 3; custom_id: string; placeholder: string;
+    options: { label: string; value: string; description?: string; default?: boolean }[] }] };
+
+export interface BetaDetailEntry { name: string; value: string }
+export interface BetaSection { id: string; title: string; entries: BetaDetailEntry[] }
