@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
+import UPNG from 'upng-js';
 import { responseStyleMetadata } from '../../src/chat/group.ts';
 import { spoilerDelimiters } from '../../src/chat/spoilers.ts';
 import { safetyInstructions, unsafeReply } from '../../src/chat/safety.ts';
@@ -484,6 +485,11 @@ try {
   const kitBeta = (await observations('edit')).at(-1).body;
   assert.ok(kitBeta.embeds[0].image);
   assert.match(kitBeta.embeds[0].description, /Skills & Passives/);
+  const kitImage = await (await mf.getWorker('mock')).fetch(kitBeta.embeds[0].image.url);
+  const kitPng = UPNG.decode(await kitImage.arrayBuffer());
+  const kitPixels = new Uint8Array(UPNG.toRGBA8(kitPng)[0]);
+  assert.ok(kitPixels.some((value, index) => index % 4 === 0 && value === 242 && kitPixels[index + 1] === 158 && kitPixels[index + 2] === 56),
+    'The Workers-rendered kit image preserves GachaBase amber text');
   await betaComponent(sectionsBeta.custom_id, kitBeta, ['textkit']);
   assert.equal((await observations('edit')).at(-1).body.embeds[0].image, undefined);
   assert.deepEqual((await observations('edit')).at(-1).body.attachments, []);

@@ -77,9 +77,9 @@ export class MockDiscord extends DurableObject {
           diff: `/diff/characters/1/test-mirror?prev=beta_9.0.51_99&cur=beta_9.0.51_${this.betaRevision}` }],
       }] }));
       if (path === '/diff/characters/1/test-mirror/__data.json') return new Response(sourcePage({
-        source: { dto: { skills: [{ id: 42, name: { text: 'Beam' }, type: { text: 'Skill' }, icon_path_hash: '123', description: { text: 'Deals 20 DMG.' } }] },
+        source: { dto: { skills: [{ id: 42, name: { text: 'Beam' }, type: { text: 'Skill' }, icon_path_hash: '123', description: { text: 'Deals <color=#f29e38ff>20</color> DMG.' } }] },
           refs: { assets: { '123-source': { url: 'https://cdn.gachabase.net/hsr/assets/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png', width: 1, height: 1 } } } },
-        target: { dto: { skills: [{ id: 42, name: { text: 'Beam' }, type: { text: 'Skill' }, icon_path_hash: '123', description: { text: 'Deals 30 DMG.' } }] },
+        target: { dto: { skills: [{ id: 42, name: { text: 'Beam' }, type: { text: 'Skill' }, icon_path_hash: '123', description: { text: 'Deals <color=#f29e38ff>30</color> DMG.' } }] },
           refs: { assets: { '123-target': { url: 'https://cdn.gachabase.net/hsr/assets/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png', width: 1, height: 1 } } } },
       }));
       this.record('unexpected', { host: url.hostname, path, method: request.method });

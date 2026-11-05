@@ -71,7 +71,8 @@ test('renders indexed tooltip percentages without inventing missing values', () 
 test('compiles readable before/after changes, kits, traces, eidolons, Light Cones, and set bonuses', () => {
   const parsed = parseDetails(diff());
   assert.match(parsed.sections[0]!.entries[0]!.value, /Deals 50% DMG[\s\S]*↓[\s\S]*Deals 75% DMG/);
-  assert.deepEqual(parsed.sections[0]!.entries[0]!.comparison, { before: 'Deals 50% DMG.', after: 'Deals 75% DMG.' });
+  assert.deepEqual(parsed.sections[0]!.entries[0]!.comparison, { before: 'Deals 50% DMG.', after: 'Deals 75% DMG.',
+    beforeEmphasis: [{ start: 6, end: 9 }], afterEmphasis: [{ start: 6, end: 9 }] });
   assert.deepEqual(parsed.sections.map(section => section.id), ['changes', 'kit', 'traces', 'eidolons', 'values']);
   assert.ok(!JSON.stringify(parsed.sections).includes('portrait'));
   const added = parseDetails(page({ dto: { ...dto(0.5),
