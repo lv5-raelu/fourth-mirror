@@ -190,6 +190,8 @@ Fourth Mirror reads the English [Gachabase beta changelog](https://hsr.gachabase
 
 The **Changes** section renders comparisons as PNG images, with removed words and complete numeric values in red, additions in green, and unchanged text in a neutral colour. Percentages, decimals, and signed/grouped numbers stay whole; `100% → 120%` highlights both complete values. A down arrow separates the earlier and newer text. Long comparisons have image pagination, and **Text Comparison** provides selectable text. The bot also needs **Attach Files** for image previews and image sharing; without it, browsing shows the text comparison. Sharing copies the displayed PNG from Discord and uploads it as a new channel attachment, so the public image does not depend on the private attachment’s lifetime. Rendering is local to the bot and uses no AI or external image service.
 
+Skill, passive, trace, and eidolon pages show the GachaBase icon to the left of the ability type and name. Current kit sections use one ability per image page, with matching **(Text)** sections for selectable text. Icons come from the revision’s asset references, are cached, and are embedded in the shared PNG; missing or unavailable icons leave the title and details readable. Artwork changes alone do not count as gameplay changes.
+
 | Command | Behavior |
 | --- | --- |
 | `/beta latest` | Show the latest revision with short change previews. Select a character or item to read comparisons, skills/passives, traces, eidolons, Light Cone effects, or set bonuses inside Discord. Works without AI configuration. |
@@ -204,7 +206,7 @@ Checks, detail browsing, sharing, and `/beta latest` make no AI requests. Overvi
 
 Notification settings and the revision watermark survive restarts. Announcement attempts reserve their watermark before delivery to suppress duplicate posts after crashes; an interrupted or failed send can therefore miss an announcement. Check `/beta alerts` for delivery errors and `/beta latest` for the current revision. Node stores settings in `beta-alerts.json` beside the AI history file (under `data/` when AI is disabled); keep that directory persistent. Workers stores them in the existing Durable Object. They are separate from conversation-history exports.
 
-For a hosted source check, an administrator can run the private control endpoint `POST /beta/verify` through the existing control client. It fetches the changelog and one comparison and renders a sample PNG, reporting `comparisonImageBytes`, without AI calls or Discord posts. It never enables notifications.
+For a hosted source check, an administrator can run the private control endpoint `POST /beta/verify` through the existing control client. It fetches the changelog and one comparison and renders a sample PNG, reporting `comparisonImageBytes` and `comparisonIconBytes`, without AI calls or Discord posts. It never enables notifications.
 
 ## Add a command
 

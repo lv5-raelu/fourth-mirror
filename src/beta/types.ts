@@ -68,5 +68,6 @@ export type BetaRow = { type: 1; components: BetaButton[] }
   | { type: 1; components: [{ type: 3; custom_id: string; placeholder: string;
     options: { label: string; value: string; description?: string; default?: boolean }[] }] };
 
-export interface BetaDetailEntry { name: string; value: string; comparison?: { before: string | null; after: string | null } }
+export interface BetaHeading { type: string; name: string; iconUrl?: string }
+export interface BetaDetailEntry { name: string; value: string; heading?: BetaHeading; comparison?: { before: string | null; after: string | null } }
 export interface BetaSection { id: string; title: string; entries: BetaDetailEntry[] }

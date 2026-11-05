@@ -77,10 +77,18 @@ export class MockDiscord extends DurableObject {
           diff: `/diff/characters/1/test-mirror?prev=beta_9.0.51_99&cur=beta_9.0.51_${this.betaRevision}` }],
       }] }));
       if (path === '/diff/characters/1/test-mirror/__data.json') return new Response(sourcePage({
-        source: { dto: { skill: { name: { text: 'Beam' }, power: 20 } } }, target: { dto: { skill: { name: { text: 'Beam' }, power: 30 } } },
+        source: { dto: { skills: [{ id: 42, name: { text: 'Beam' }, type: { text: 'Skill' }, icon_path_hash: '123', description: { text: 'Deals 20 DMG.' } }] },
+          refs: { assets: { '123-source': { url: 'https://cdn.gachabase.net/hsr/assets/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png', width: 1, height: 1 } } } },
+        target: { dto: { skills: [{ id: 42, name: { text: 'Beam' }, type: { text: 'Skill' }, icon_path_hash: '123', description: { text: 'Deals 30 DMG.' } }] },
+          refs: { assets: { '123-target': { url: 'https://cdn.gachabase.net/hsr/assets/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png', width: 1, height: 1 } } } },
       }));
       this.record('unexpected', { host: url.hostname, path, method: request.method });
       return new Response('Unexpected beta route', { status: 404 });
+    }
+    if (url.hostname === 'cdn.gachabase.net') {
+      this.record('beta-icon-source', { path, authorization: request.headers.get('Authorization') });
+      if (!/^\/hsr\/assets\/[a-f0-9]{32}\.png$/.test(path)) return new Response('Unknown asset', { status: 404 });
+      return new Response(Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAEklEQVR4nGMUrHz+nwEPGCEKABhxE4k0XHgqAAAAAElFTkSuQmCC'), char => char.charCodeAt(0)), { headers: { 'Content-Type': 'image/png' } });
     }
     if (request.headers.get('Upgrade') === 'websocket') {
       const [client, server] = Object.values(new WebSocketPair());
@@ -232,7 +240,7 @@ export class MockDiscord extends DurableObject {
 
 export default {
   fetch(request, env) {
-    if (!['discord.com', 'cdn.discordapp.com', 'media.discordapp.net', 'gif.fxtwitter.com', 'gateway.discord.gg', 'resume.discord.gg', 'ai.probe.invalid', 'web.probe.invalid', 'control.probe.invalid', 'hsr.gachabase.net'].includes(new URL(request.url).hostname)) {
+    if (!['discord.com', 'cdn.discordapp.com', 'media.discordapp.net', 'gif.fxtwitter.com', 'gateway.discord.gg', 'resume.discord.gg', 'ai.probe.invalid', 'web.probe.invalid', 'control.probe.invalid', 'hsr.gachabase.net', 'cdn.gachabase.net'].includes(new URL(request.url).hostname)) {
       return new Response('External network disabled', { status: 403 });
     }
     return env.MOCK.getByName('services').fetch(request);

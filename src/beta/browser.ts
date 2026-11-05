@@ -7,8 +7,9 @@ import type { BetaClient } from './source.ts';
 import { entitySourceUrl } from './source.ts';
 import type { BetaDetailEntry, BetaFeed, BetaMessage, BetaRevision } from './types.ts';
 import { discordText } from './text.ts';
-import { diffImagePages } from './diff-image.ts';
+import { currentImagePages, diffImagePages } from './diff-image.ts';
 import { renderDiffImage } from './render.ts';
+import { betaIcons } from './icons.ts';
 
 /** Exercise the hosted source and image renderer without sending a Discord post. */
 export async function verifyBeta(client: BetaClient) {
@@ -17,7 +18,8 @@ export async function verifyBeta(client: BetaClient) {
   const entity = revision.entities.find(entity => entity.diffUrl);
   const details = entity ? await client.entityDetails(entity, revision) : undefined;
   const page = details ? diffImagePages(details.sections.find(section => section.id === 'changes')!.entries)[0] : undefined;
-  return { ...source, comparisonImageBytes: page ? (await renderDiffImage(page)).length : 0 };
+  return { ...source, comparisonImageBytes: page ? (await renderDiffImage(page)).length : 0,
+    comparisonIconBytes: page?.iconUrl ? (await betaIcons.load(page.iconUrl))?.length ?? 0 : 0 };
 }
 
 /** Compile a few real comparisons without making an overview as long as a kit. */
@@ -91,14 +93,19 @@ export async function browseMessage(client: BetaClient, customId: string, values
   try { details = await client.entityDetails(entity, revision); }
   catch { return unavailableMessage(view, revision, feed); }
   const sections = [...details.sections];
+  const textSections: Record<string, string> = { kit: 'textkit', traces: 'texttrace', eidolons: 'texteid' };
+  for (const section of details.sections) if (textSections[section.id]) {
+    sections.splice(sections.findIndex(value => value.id === section.id) + 1, 0, { ...section, id: textSections[section.id]!, title: `${section.title} (Text)` });
+  }
   const changes = sections.find(section => section.id === 'changes');
   if (changes?.entries.some(entry => entry.comparison)) sections.splice(1, 0, { ...changes, id: 'text', title: 'Text Comparison' });
   const section = sections.find(section => section.id === view.section);
   if (!section) throw new ChatError('That section is no longer available. Select the character or item again.');
   let imagePages: ReturnType<typeof diffImagePages> = [];
   let imageFailure = false;
-  if (view.section === 'changes' && imagesAllowed) {
-    try { imagePages = diffImagePages(section.entries); }
+  const isImageSection = view.section === 'changes' || Boolean(textSections[view.section]);
+  if (isImageSection && imagesAllowed) {
+    try { imagePages = view.section === 'changes' ? diffImagePages(section.entries) : currentImagePages(section.entries); }
     catch { imageFailure = true; }
   }
   const pages = detailPages(section.entries);
@@ -118,9 +125,9 @@ export async function browseMessage(client: BetaClient, customId: string, values
     ...(details.from && details.to ? [`Comparison: ${identityLabel(details.from)} → ${identityLabel(details.to)}`] : []),
     'Descriptions show the first listed level/rank. All Changed Values includes other levels when supplied.',
     ...(feed.stale ? ['Cached archive — Gachabase could not be refreshed.'] : []),
-    ...(file ? ['Red: removed · Green: added. Use Text Comparison for selectable text.'] : []),
-    ...(imageFailure ? ['Image preview unavailable; showing the text comparison.'] : []),
-    ...(!imagesAllowed && view.section === 'changes' ? ['Image previews need Attach Files permission here; showing the text comparison.'] : []),
+    ...(file ? [view.section === 'changes' ? 'Red: removed · Green: added. Use Text Comparison for selectable text.' : `Use ${section.title} (Text) for selectable text.`] : []),
+    ...(imageFailure ? ['Image preview unavailable; showing the text view.'] : []),
+    ...(!imagesAllowed && isImageSection ? ['Image previews need Attach Files permission here; showing the text view.'] : []),
   ].join('\n');
   return { embeds: [{ title: discordText(entity.name).slice(0, 256), description, color: 0xce6687, url: entitySourceUrl(entity, revision),
     ...(file ? { image: { url: 'attachment://beta-diff.png' } } : { fields: pages[view.page]! }),

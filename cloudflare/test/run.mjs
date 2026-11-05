@@ -457,6 +457,8 @@ try {
   const detailBeta = (await observations('edit')).at(-1).body;
   assert.ok(detailBeta.embeds[0].image.url.startsWith('https://cdn.discordapp.com/ephemeral-attachments/'));
   assert.deepEqual((await observations('beta-upload')).at(-1).signature, [137, 80, 78, 71, 13, 10, 26, 10]);
+  assert.equal((await observations('beta-icon-source')).length, 1);
+  assert.equal((await observations('beta-icon-source'))[0].authorization, null);
   const publicClick = await betaComponent(selectBeta.custom_id, latestBeta, ['0'], { message: { ...latestBeta, flags: 0 } });
   assert.deepEqual((await observations('callback')).find(call => call.path.includes(publicClick)).body, { type: 5, data: { flags: 64 } });
   const shareBeta = detailBeta.components.flatMap(row => row.components).find(component => component.label === 'Share to channel');
@@ -477,7 +479,15 @@ try {
   await betaComponent(sectionsBeta.custom_id, detailBeta, ['text']);
   const textBeta = (await observations('edit')).at(-1).body;
   assert.equal(textBeta.embeds[0].image, undefined); assert.deepEqual(textBeta.attachments, []);
-  assert.match(JSON.stringify(textBeta.embeds), /20 → 30/);
+  assert.match(JSON.stringify(textBeta.embeds), /20.*↓.*30/s);
+  await betaComponent(sectionsBeta.custom_id, detailBeta, ['kit']);
+  const kitBeta = (await observations('edit')).at(-1).body;
+  assert.ok(kitBeta.embeds[0].image);
+  assert.match(kitBeta.embeds[0].description, /Skills & Passives/);
+  await betaComponent(sectionsBeta.custom_id, kitBeta, ['textkit']);
+  assert.equal((await observations('edit')).at(-1).body.embeds[0].image, undefined);
+  assert.deepEqual((await observations('edit')).at(-1).body.attachments, []);
+  assert.equal((await observations('beta-icon-source')).length, 1, 'Kit, comparison, text navigation, and sharing reuse the cached icon');
   await betaComponent(selectBeta.custom_id, latestBeta, ['0'], { app_permissions: String(BigInt(permissions) | 16384n) });
   assert.equal((await observations('edit')).at(-1).body.embeds[0].image, undefined);
   assert.match((await observations('edit')).at(-1).body.embeds[0].description, /Attach Files/);
@@ -511,7 +521,7 @@ try {
   const betaModel = (await observations('model')).at(-1).body;
   assert.ok(!betaModel.tools, 'Source-grounded queries should not trigger generic web tools');
   const grounding = JSON.parse(betaModel.messages.at(-2).content).source_context;
-  assert.equal(JSON.parse(grounding.content).details[0].changes[0].after, '30');
+  assert.equal(JSON.parse(grounding.content).details[0].changes[0].after, 'Deals 30 DMG.');
   assert.match((await observations('edit')).at(-1).body.embeds[0].title, /Beta Inquiry/);
   const answerBeta = (await observations('edit')).at(-1).body;
   const aiBeforeShare = (await observations('model')).length;
@@ -521,7 +531,8 @@ try {
   assert.deepEqual(await history(), betaHistoryBefore);
   const verifiedBeta = await request('/beta/verify', 'POST');
   assert.ok(verifiedBeta.comparisonImageBytes > 1_000);
-  const { comparisonImageBytes: _imageBytes, ...verifiedSource } = verifiedBeta;
+  assert.ok(verifiedBeta.comparisonIconBytes > 0);
+  const { comparisonImageBytes: _imageBytes, comparisonIconBytes: _iconBytes, ...verifiedSource } = verifiedBeta;
   assert.deepEqual(verifiedSource, { ok: true, version: '9.0.51', revision: 101, entities: 1, comparisonFields: 1, alertsEnabled: true });
   assert.ok((await observations('beta-source')).every(value => value.authorization === null));
   await response('/__crash', 'POST');
