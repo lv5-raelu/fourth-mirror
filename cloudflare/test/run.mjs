@@ -393,14 +393,18 @@ try {
   const searchesBeforeConnection = (await observations('search')).length;
   const teaMention = { ...mention, id: nextId(), author: { id: nextId() }, content: '<@' + botId + '> I bought milk tea after work.' };
   await emit('MESSAGE_CREATE', teaMention); await complete(teaMention.id);
+  assert.ok(!(await observations('model')).at(-1).body.messages.some(message => message.content.startsWith('{"lore_context":')),
+    'An everyday keyword must not automatically prime a game comparison');
+  const requestedTea = { ...teaMention, id: nextId(), author: { id: nextId() }, content: '<@' + botId + '> Use an analogy for milk tea.' };
+  await emit('MESSAGE_CREATE', requestedTea); await complete(requestedTea.id);
   const connectedReply = (await observations('delivery')).at(-1).body.content;
-  assert.match(connectedReply, /This reminds me of Immortal’s Delight/);
+  assert.match(connectedReply, /Immortal’s Delight/);
   assert.doesNotMatch(connectedReply, /https?:|\[L\d+\]/);
   const teaContext = (await observations('model')).at(-1).body.messages.find(message => message.content.startsWith('{"lore_context":'));
   assert.equal(JSON.parse(teaContext.content).lore_context.connection.concept, 'milk tea');
   assert.equal((await observations('search')).length, searchesBeforeConnection);
   assert.deepEqual(await history(), storedBeforeMention);
-  pass('Everyday concepts receive a bounded, sourced lore connection in Workers without web search or one-off history storage');
+  pass('Everyday concepts stay unprimed while requested comparisons receive bounded lore context without web search or one-off history storage');
 
   await control({ mode: 'story-model' });
   const storyMention = { ...mention, id: nextId(), author: { id: nextId() }, content: '<@' + botId + '> Explain Cocolia’s ending.' };

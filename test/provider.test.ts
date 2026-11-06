@@ -137,6 +137,7 @@ test('recent analogies reach provider tool rounds and keep direct game questions
   for (const request of requests) {
     const latest = request.messages.find(message => message.role === 'user' && message.content.includes('Explain Skill Points themselves.'))!;
     assert.deepEqual(JSON.parse(latest.content).recent_analogy_references, ['Skill Points and resource-pool comparisons']);
+    assert.match(request.messages[0]!.content, /skip unsolicited analogies on this turn/);
   }
   await provider.reply([{ role: 'user', content: 'Plain advice please.' }], { questionAuthor: 'Rae', recentMessages: [
     { author: 'User', content: 'Curios.' }, { author: 'Fourth Mirror', content: 'A Simulated Universe trial.', isOwnReply: true },
@@ -243,7 +244,7 @@ test('crossovers omit unnecessary lore links but keep requested sources in paren
   assert.equal(optedOut, ordinary);
 });
 
-test('everyday connections reach personal, group, and mention requests without tools or unrelated background triggering lore', async t => {
+test('personal, group, and mention replies avoid unsolicited lore bridges while requested analogies retain sources', async t => {
   const requests: { messages: { role: string; content: string }[]; tools?: unknown }[] = [];
   const baseUrl = await mockServer(t, (req, res) => {
     const chunks: Buffer[] = [];
@@ -251,7 +252,7 @@ test('everyday connections reach personal, group, and mention requests without t
     req.on('end', () => {
       requests.push(JSON.parse(Buffer.concat(chunks).toString()));
       res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ choices: [{ message: { content: 'This reminds me of Immortal’s Delight! A favorite milk-tea treat. [L1]' } }] }));
+      res.end(JSON.stringify({ choices: [{ message: { content: 'A short in-character reply.' } }] }));
     });
   });
   const provider = new OpenAICompatibleProvider(settings(baseUrl, { loreTools: false }));
@@ -263,11 +264,14 @@ test('everyday connections reach personal, group, and mention requests without t
   assert.doesNotMatch(answer, /https?:|\[L\d+\]/);
   for (const request of requests) {
     assert.ok(!request.tools);
-    const context = JSON.parse(request.messages.find(message => message.content.startsWith('{"lore_context":'))!.content).lore_context;
-    assert.deepEqual(context.entries.map((item: { entry: { id: string } }) => item.entry.id), ['immortals-delight']);
-    assert.equal(context.connection.concept, 'bubble tea');
+    assert.ok(!request.messages.some(message => message.content.startsWith('{"lore_context":')));
+    assert.match(request.messages[0]!.content, /Most ordinary replies should contain no Star Rail analogy/);
     assert.ok(request.messages[0]!.content.endsWith(safetyInstructions));
   }
+  await provider.reply([{ role: 'user', content: 'Use an analogy for bubble tea after work.' }], background);
+  const context = JSON.parse(requests.at(-1)!.messages.find(message => message.content.startsWith('{"lore_context":'))!.content).lore_context;
+  assert.deepEqual(context.entries.map((item: { entry: { id: string } }) => item.entry.id), ['immortals-delight']);
+  assert.equal(context.connection.concept, 'bubble tea');
   await provider.reply([{ role: 'user', content: 'Only JSON: a bubble tea menu.' }], background);
   assert.ok(!requests.at(-1)!.messages.some(message => message.content.startsWith('{"lore_context":')));
 });

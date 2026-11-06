@@ -215,7 +215,7 @@ export class MockDiscord extends DurableObject {
         const context = envelope ? JSON.parse(envelope.content).lore_context : undefined;
         const source = context?.entries.find(item => item.entry.id === 'immortals-delight')?.source_id;
         return Response.json({ choices: [{ message: { role: 'assistant', content: source && context.connection
-          ? 'This reminds me of Immortal’s Delight! A favorite milk-tea treat. [' + source + ']' : 'No connection was supplied.' }, finish_reason: 'stop' }] });
+          ? 'Immortal’s Delight is another indulgent tea drink. [' + source + ']' : 'No connection was supplied.' }, finish_reason: 'stop' }] });
       }
       if (this.mode === 'lore-model') {
         const source = last.role === 'tool' ? JSON.parse(last.content).entries[0]?.source_id : undefined;

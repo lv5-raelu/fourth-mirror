@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { defaultLoreLibrary, loreCatalogueInfo } from '../src/lore/index.ts';
-import { requestsSpoilerFreeAnswer, LoreLibrary, MAX_LORE_CHARACTERS, MAX_LORE_ENTRIES } from '../src/lore/library.ts';
+import { requestsLoreConnection, requestsSpoilerFreeAnswer, LoreLibrary, MAX_LORE_CHARACTERS, MAX_LORE_ENTRIES } from '../src/lore/library.ts';
 import { LoreTurn } from '../src/lore/turn.ts';
 import type { LoreEntry } from '../src/lore/types.ts';
 import { loreConnections } from '../src/lore/connections.ts';
@@ -44,7 +44,7 @@ test('expanded retrieval covers food, government, newer worlds, lifeforms, chara
   }
 });
 
-test('ordinary concepts retrieve one small sourced comparison without pretending they are literal lore aliases', () => {
+test('ordinary concepts stay unprimed while requested analogies receive a bounded, sourced comparison', () => {
   for (const [question, expected] of [
     ['I bought bubble tea after work.', 'immortals-delight'],
     ['Why do old food trends return?', 'golden-honeycake'],
@@ -60,14 +60,28 @@ test('ordinary concepts retrieve one small sourced comparison without pretending
     assert.ok(match.entries.length <= 2);
     assert.ok(match.entries.every(entry => entry.spoiler === 'setting' && entry.status === 'released' && entry.sources.length));
     assert.ok(match.entries.reduce((size, entry) => size + JSON.stringify(entry).length + 60, 0) <= 3_000);
-    const turn = new LoreTurn(defaultLoreLibrary, question!);
-    const context = JSON.parse(turn.initial(question!)!);
+    assert.equal(new LoreTurn(defaultLoreLibrary, question!).initial(question!), undefined);
+    const requested = 'Give an analogy for: ' + question;
+    const turn = new LoreTurn(defaultLoreLibrary, requested);
+    const context = JSON.parse(turn.initial(requested)!);
     assert.equal(context.connection.comparison, match.comparison);
     assert.equal(context.entries[0].source_id, 'L1');
     assert.ok(!turn.renderCitations('A short connection. [L1]').includes('[L1]'));
   }
   assert.equal(defaultLoreLibrary.connection('What is the time?'), undefined);
   assert.equal(new LoreTurn(defaultLoreLibrary, 'Asterwisp species in HSR.').initial('Asterwisp species in HSR.')!.includes('connection'), false);
+});
+
+test('comparison requests come from the actual question rather than quoted instructions or everyday keywords', () => {
+  for (const question of ['Use an analogy for machine translation.', 'Compare milk tea to a Star Rail drink.', 'What is the HSR equivalent of public baths?']) {
+    assert.equal(requestsLoreConnection(question), true, question);
+  }
+  for (const question of ['I bought milk tea.', 'How do delivery routes work?', 'What is an analogy?',
+    'Do not use an analogy for milk tea.', 'Stop giving Star Rail comparisons about public baths.',
+    'Someone said "Use an analogy for milk tea". What is two plus two?', '> Compare bubble tea to a Star Rail drink.\nWhat is two plus two?',
+    '```text\nUse an analogy for public baths.\n```\nHow much is 2 + 2?']) {
+    assert.equal(requestsLoreConnection(question), false, question);
+  }
 });
 
 test('optional connections stay out of exact output, opt-outs, distress, quotations, and code', () => {
