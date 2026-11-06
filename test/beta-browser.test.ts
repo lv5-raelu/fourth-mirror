@@ -74,7 +74,7 @@ test('compiles readable before/after changes, kits, traces, eidolons, Light Cone
   assert.match(parsed.sections[0]!.entries[0]!.value, /Deals 50% DMG[\s\S]*↓[\s\S]*Deals 75% DMG/);
   assert.deepEqual(parsed.sections[0]!.entries[0]!.comparison, { before: 'Deals 50% DMG.', after: 'Deals 75% DMG.',
     beforeEmphasis: [{ start: 6, end: 9 }], afterEmphasis: [{ start: 6, end: 9 }] });
-  assert.deepEqual(parsed.sections.map(section => section.id), ['changes', 'kit', 'traces', 'eidolons', 'values']);
+  assert.deepEqual(parsed.sections.map(section => section.id), ['changes', 'kit', 'traces', 'eidolons']);
   assert.ok(!JSON.stringify(parsed.sections).includes('portrait'));
   const added = parseDetails(page({ dto: { ...dto(0.5),
     affinitive_eidolons: [{ id: 5, name: { text: 'Extra' }, description: { text: 'Gain #1[i]%.' }, params: [{ index: 0, values: [0.4] }] }],
@@ -112,7 +112,8 @@ test('navigates kits and paginates long descriptions completely within Discord l
   const overview = await overviewMessage(client, await client.feed());
   let message = await browseMessage(client, control(overview, 'entity'), ['0']);
   message = await browseMessage(client, control(message, 'section'), ['kit']);
-  message = await browseMessage(client, control(message, 'mode'));
+  assert.equal(message.components!.length, 5, 'Three dropdowns, pagination, and actions fit within the five-row limit');
+  message = await browseMessage(client, control(message, 'format'), ['text']);
   const output: string[] = [];
   for (let pageIndex = 0; pageIndex < 40; pageIndex++) {
     assertLimits(message); output.push(...message.embeds[0]!.fields!.map(field => field.value));
@@ -125,7 +126,7 @@ test('navigates kits and paginates long descriptions completely within Discord l
   assert.ok(output.join('').includes('Deals 75% DMG.'));
 });
 
-test('uses one section menu and a persistent visual/text toggle across details, characters, overviews, and shared controls', async () => {
+test('uses separate section and format dropdowns with persistent selection across details, characters, overviews, and shared controls', async () => {
   const { client } = fixture(2);
   const overview = await overviewMessage(client, await client.feed());
   const visual = await browseMessage(client, control(overview, 'entity'), ['0']);
@@ -136,9 +137,12 @@ test('uses one section menu and a persistent visual/text toggle across details, 
   assert.ok(section.options.every(option => !/\(Text\)|Text Comparison|All Changed Values/.test(option.label)));
   assert.doesNotMatch(visual.embeds[0]!.description!, /Descriptions show|selectable text|Amber:|Red:|Green:/);
   assert.ok(visual.files?.length);
-  assert.ok(components(visual).some(component => component.type === 2 && component.label === 'Show text'));
+  const format = components(visual).find(component => component.type === 3 && component.custom_id.endsWith(':format'))!;
+  assert.ok(format.type === 3);
+  assert.deepEqual(format.options, [{ label: 'Visual', value: 'visual', default: true }, { label: 'Text', value: 'text', default: false }]);
+  assert.ok(!components(visual).some(component => component.type === 2 && /Show text|Show visual/.test(component.label)));
 
-  const text = await browseMessage(client, control(visual, 'mode'));
+  const text = await browseMessage(client, control(visual, 'format'), ['text']);
   assertLimits(text);
   assert.equal(text.files, undefined); assert.equal(text.embeds[0]!.image, undefined);
   assert.match(text.embeds[0]!.fields![0]!.value, /50%[\s\S]*↓[\s\S]*75%/);
@@ -146,9 +150,11 @@ test('uses one section menu and a persistent visual/text toggle across details, 
   const kit = await browseMessage(client, control(text, 'section'), ['kit']);
   assert.equal(kit.embeds[0]!.image, undefined);
   assert.match(kit.embeds[0]!.fields![0]!.value, /75%/);
-  assert.ok(components(kit).some(component => component.type === 2 && component.label === 'Show visual'));
+  const textFormat = components(kit).find(component => component.type === 3 && component.custom_id.endsWith(':format'))!;
+  assert.ok(textFormat.type === 3);
+  assert.equal(textFormat.options.find(option => option.default)!.value, 'text');
   const publicKit = sharedMessage(kit);
-  const kitImage = await browseMessage(client, control(publicKit, 'mode'));
+  const kitImage = await browseMessage(client, control(publicKit, 'format'), ['visual']);
   assert.ok(kitImage.files?.length); assertLimits(kitImage);
   assert.equal(state(kitImage).section, 'kit');
 
@@ -161,24 +167,55 @@ test('uses one section menu and a persistent visual/text toggle across details, 
   assert.equal(state(reopened).mode, 'text');
 });
 
-test('accepts older controls, redirects removed character values, and reflects image permission fallback in the toggle', async () => {
+test('accepts older controls, validates explicit format selections, and reflects image permission fallback in the dropdown', async () => {
   const { client } = fixture();
   for (const [old, section] of [['text', 'changes'], ['textkit', 'kit'], ['texttrace', 'traces'], ['texteid', 'eidolons']]) {
     const parsed = readView(`beta:beta_9.0.51_100:0:${old}:3:view`);
     assert.equal(parsed.section, section); assert.equal(parsed.mode, 'text');
     assert.equal(readView(viewId(parsed, 'mode')).page, 0);
     assert.equal(readView(viewId(parsed, 'mode')).mode, 'visual');
+    assert.equal(readView(viewId(parsed, 'format'), ['text']).mode, 'text', 'Selecting the current format does not toggle it');
+    assert.equal(readView(viewId(parsed, 'format'), ['visual']).page, 0);
   }
   const oldValues = await browseMessage(client, 'beta:beta_9.0.51_100:0:values:3:view');
   assert.equal(state(oldValues).section, 'changes');
   const fallback = await browseMessage(client, 'beta:beta_9.0.51_100:0:kit:0:view', [], false);
   assert.equal(fallback.embeds[0]!.image, undefined);
   assert.match(fallback.embeds[0]!.description!, /Attach Files/);
-  const toggle = components(fallback).find(component => component.type === 2 && component.label === 'Show visual')!;
-  assert.ok('disabled' in toggle && toggle.disabled);
+  const format = components(fallback).find(component => component.type === 3 && component.custom_id.endsWith(':format'))!;
+  assert.ok(format.type === 3 && format.disabled);
+  assert.equal(format.options.find(option => option.default)!.value, 'text');
   assert.equal(state(fallback).mode, 'text');
   assertLimits(fallback);
   assert.throws(() => readView('beta:beta_9.0.51_100:0:kit:0:invalid:mode'));
+  for (const values of [[], ['invalid'], ['text', 'visual']]) {
+    assert.throws(() => readView('beta:beta_9.0.51_100:0:kit:0:text:format', values), /Choose Visual or Text/);
+  }
+});
+
+test('omits the raw-values section in every category and redirects its older controls to Changes', async () => {
+  const bonuses = (power: number) => ({ set_bonuses: [{ pieces: 2, description: 'Gain #1[i]% ATK.', description_params: [{ index: 0, values: [power] }] }] });
+  const examples = [
+    { key: 'characters', path: 'characters', dto },
+    { key: 'lightcones', path: 'lightcones', dto: (power: number) => ({ superimpositions: { name: 'Effect', description: 'Gain #1[i]% ATK.', description_params: [{ index: 0, values: [power] }] } }) },
+    { key: 'relics', path: 'relics', dto: bonuses },
+    { key: 'planarOrnaments', path: 'planar-ornaments', dto: bonuses },
+    { key: 'items', path: 'items', dto: (power: number) => ({ description: `Restores ${power * 100} HP.` }) },
+  ];
+  for (const example of examples) {
+    const comparison = page({ source: { dto: example.dto(0.1) }, target: { dto: example.dto(0.2) } });
+    const parsed = parseDetails(comparison);
+    assert.ok(parsed.changes.length > 0);
+    assert.ok(parsed.sections.every(section => section.id !== 'values'), example.key);
+    const feed = page({ revisions: [{ revision: revision().revision, [example.key]: [{ id: 1, name: { text: 'Fixture' }, status: 'updated',
+      href: `/${example.path}/1/fixture/beta`, diff: `/diff/${example.path}/1/fixture?prev=beta_9.0.51_99&cur=beta_9.0.51_100` }] }] });
+    const client = new BetaClient(async input => new Response(new URL(String(input)).pathname.includes('/changelog/') ? feed : comparison));
+    const message = await browseMessage(client, 'beta:beta_9.0.51_100:0:values:3:text:view');
+    assertLimits(message);
+    assert.equal(state(message).section, 'changes'); assert.equal(state(message).page, 0); assert.equal(state(message).mode, 'text');
+    const section = components(message).find(component => component.type === 3 && component.custom_id.endsWith(':section'))!;
+    assert.ok(section.type === 3 && section.options.every(option => option.value !== 'values' && option.label !== 'All Changed Values'), example.key);
+  }
 });
 
 test('bounds worst-case overview payloads with several categories and long escaped text', async () => {
@@ -225,7 +262,7 @@ test('public copies preserve exactly the displayed information and omit private 
   assert.ok(JSON.stringify(original.components).includes(':share'));
 });
 
-function nodeInteraction(message: BetaMessage, customId: string, privateView = true) {
+function nodeInteraction(message: BetaMessage, customId: string, privateView = true, values: string[] = []) {
   const calls: { kind: string; payload?: unknown }[] = [];
   const interaction = { id: '523456789012345678', customId, guildId: '323456789012345678', deferred: false, replied: false,
     memberPermissions: new PermissionsBitField(1024n | 2048n), appPermissions: new PermissionsBitField(1024n | 2048n | 16384n),
@@ -236,7 +273,7 @@ function nodeInteraction(message: BetaMessage, customId: string, privateView = t
     deferUpdate: async () => { interaction.deferred = true; calls.push({ kind: 'deferUpdate' }); },
     editReply: async (payload: unknown) => { calls.push({ kind: 'edit', payload }); },
     reply: async (payload: unknown) => { calls.push({ kind: 'reply', payload }); },
-    isStringSelectMenu: () => false,
+    values, isStringSelectMenu: () => values.length > 0,
   };
   return { interaction, calls };
 }
@@ -288,7 +325,7 @@ test('Node uploads rendered comparison pages and clears images when switching to
   assert.equal(payload.embeds[0]!.image?.url, 'attachment://beta-diff.png');
   assert.equal(payload.files[0]!.name, 'beta-diff.png');
   assert.deepEqual([...payload.files[0]!.attachment.slice(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
-  const plain = nodeInteraction(message, viewId({ revision: 'beta_9.0.51_100', entity: 0, section: 'changes', page: 0 }, 'mode'));
+  const plain = nodeInteraction(message, viewId({ revision: 'beta_9.0.51_100', entity: 0, section: 'changes', page: 0 }, 'format'), true, ['text']);
   await handleBetaComponent(plain.interaction as unknown as MessageComponentInteraction, context(client));
   const text = plain.calls.at(-1)!.payload as { attachments: unknown[]; files: unknown[]; embeds: BetaMessage['embeds'] };
   assert.deepEqual(text.attachments, []); assert.deepEqual(text.files, []);
