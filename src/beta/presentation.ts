@@ -2,6 +2,7 @@ import { BETA_URL } from './source.ts';
 import type { BetaAlertState, BetaFeed, BetaMessage, BetaRevision } from './types.ts';
 import { truncateDiscordText } from '../chat/messages.ts';
 import { ENTITIES_PER_PAGE, entityMenu, pageButtons, viewId } from './navigation.ts';
+import type { BetaMode } from './navigation.ts';
 
 const color = 0xce6687;
 const clean = (value: string): string => value.replace(/[\\`*_~|\[\]<>@]/g, '').slice(0, 120);
@@ -9,12 +10,12 @@ const linkButton = { type: 1 as const, components: [{ type: 2 as const, style: 5
 const footer = { text: 'Gachabase • Unofficial beta data • Subject to change • Checked' };
 const label = (revision: BetaRevision) => `v${revision.version} · Rev. ${revision.revision}`;
 
-export function latestMessage(feed: BetaFeed, notifications?: BetaRevision[], requestedPage = 0): BetaMessage {
+export function latestMessage(feed: BetaFeed, notifications?: BetaRevision[], requestedPage = 0, mode: BetaMode = 'visual'): BetaMessage {
   const revision = feed.revisions[0]!;
   const pages = Math.max(1, Math.ceil(revision.entities.length / ENTITIES_PER_PAGE));
   const page = Math.max(0, Math.min(requestedPage, pages - 1));
   const entities = revision.entities.slice(page * ENTITIES_PER_PAGE, (page + 1) * ENTITIES_PER_PAGE);
-  const view = { revision: revision.key, entity: -1, section: 'overview', page };
+  const view = { revision: revision.key, entity: -1, section: 'overview', page, mode };
   const fields = [{ name: 'Version', value: `v${revision.version} (BETA)`, inline: true }, { name: 'Design revision', value: String(revision.revision), inline: true }];
   for (const category of [...new Set(entities.map(entity => entity.category))]) {
     const entries = entities.filter(entity => entity.category === category);

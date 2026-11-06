@@ -2,19 +2,28 @@ import { ChatError } from '../chat/types.ts';
 import type { BetaRevision, BetaRow, BetaSection } from './types.ts';
 
 export const ENTITIES_PER_PAGE = 20;
-export interface BetaView { revision: string; entity: number; section: string; page: number }
-export const viewId = (view: BetaView, control = 'view'): string => `beta:${view.revision}:${view.entity}:${view.section}:${view.page}:${control}`;
+export type BetaMode = 'visual' | 'text';
+export interface BetaView { revision: string; entity: number; section: string; page: number; mode?: BetaMode }
+export const viewId = (view: BetaView, control = 'view'): string => `beta:${view.revision}:${view.entity}:${view.section}:${view.page}:${view.mode ?? 'visual'}:${control}`;
+
+const legacySections: Record<string, string> = { text: 'changes', textkit: 'kit', texttrace: 'traces', texteid: 'eidolons' };
+function normalizeSection(view: BetaView): void {
+  if (legacySections[view.section]) { view.section = legacySections[view.section]!; view.mode = 'text'; }
+}
 
 export function readView(customId: string, values: string[] = []): BetaView {
-  const match = /^beta:(beta_\d{1,3}\.\d{1,3}\.\d{1,3}_\d{1,16}):(-1|\d{1,4}):([a-z]{1,10}):(\d{1,4}):(view|entity|section|share)$/.exec(customId);
+  const match = /^beta:(beta_\d{1,3}\.\d{1,3}\.\d{1,3}_\d{1,16}):(-1|\d{1,4}):([a-z]{1,10}):(\d{1,4}):(?:(visual|text):)?(view|entity|section|mode|share)$/.exec(customId);
   if (!match) throw new ChatError('That beta control is no longer available. Run /beta latest again.');
-  const view = { revision: match[1]!, entity: Number(match[2]), section: match[3]!, page: Number(match[4]) };
-  if (match[5] === 'entity') {
+  const view: BetaView = { revision: match[1]!, entity: Number(match[2]), section: match[3]!, page: Number(match[4]), mode: match[5] as BetaMode | undefined ?? 'visual' };
+  normalizeSection(view);
+  if (match[6] === 'entity') {
     if (values.length !== 1 || !/^\d{1,4}$/.test(values[0]!)) throw new ChatError('Choose a character or item from the menu.');
     view.entity = Number(values[0]); view.section = 'changes'; view.page = 0;
-  } else if (match[5] === 'section') {
+  } else if (match[6] === 'section') {
     if (values.length !== 1 || !/^[a-z]{1,10}$/.test(values[0]!)) throw new ChatError('Choose a section from the menu.');
-    view.section = values[0]!; view.page = 0;
+    view.section = values[0]!; view.page = 0; normalizeSection(view);
+  } else if (match[6] === 'mode') {
+    view.mode = view.mode === 'text' ? 'visual' : 'text'; view.page = 0;
   }
   return view;
 }

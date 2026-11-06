@@ -476,12 +476,22 @@ try {
   assert.deepEqual(sharedBeta.allowed_mentions.parse, []);
   assert.equal((await observations('beta-source')).length, sourcesBeforeShare, 'Sharing copies the displayed snapshot without another read');
   assert.match((await observations('edit')).at(-1).body.content, /Shared this page/);
-  const sectionsBeta = detailBeta.components.flatMap(row => row.components).find(component => component.type === 3 && component.options.some(option => option.value === 'text'));
-  await betaComponent(sectionsBeta.custom_id, detailBeta, ['text']);
+  const sectionsBeta = detailBeta.components.flatMap(row => row.components).find(component => component.type === 3 && component.options.some(option => option.value === 'changes'));
+  assert.ok(sectionsBeta.options.every(option => !/\(Text\)|Text Comparison|All Changed Values/.test(option.label)));
+  assert.doesNotMatch(detailBeta.embeds[0].description, /Descriptions show|selectable text|Amber:|Red:|Green:/);
+  const modeBeta = detailBeta.components.flatMap(row => row.components).find(component => component.label === 'Show text');
+  const publicMode = await betaComponent(modeBeta.custom_id, sharedBeta, [], { message: { ...sharedBeta, flags: 0 } });
+  assert.deepEqual((await observations('callback')).find(call => call.path.includes(publicMode)).body, { type: 5, data: { flags: 64 } });
   const textBeta = (await observations('edit')).at(-1).body;
   assert.equal(textBeta.embeds[0].image, undefined); assert.deepEqual(textBeta.attachments, []);
   assert.match(JSON.stringify(textBeta.embeds), /20.*↓.*30/s);
-  await betaComponent(sectionsBeta.custom_id, detailBeta, ['kit']);
+  const textSectionsBeta = textBeta.components.flatMap(row => row.components).find(component => component.type === 3 && component.options.some(option => option.value === 'changes'));
+  await betaComponent(textSectionsBeta.custom_id, textBeta, ['kit']);
+  const textKitBeta = (await observations('edit')).at(-1).body;
+  assert.equal(textKitBeta.embeds[0].image, undefined);
+  assert.match(textKitBeta.embeds[0].fields[0].value, /30/);
+  const showVisualBeta = textKitBeta.components.flatMap(row => row.components).find(component => component.label === 'Show visual');
+  await betaComponent(showVisualBeta.custom_id, textKitBeta);
   const kitBeta = (await observations('edit')).at(-1).body;
   assert.ok(kitBeta.embeds[0].image);
   assert.match(kitBeta.embeds[0].description, /Skills & Passives/);
@@ -490,7 +500,8 @@ try {
   const kitPixels = new Uint8Array(UPNG.toRGBA8(kitPng)[0]);
   assert.ok(kitPixels.some((value, index) => index % 4 === 0 && value === 242 && kitPixels[index + 1] === 158 && kitPixels[index + 2] === 56),
     'The Workers-rendered kit image preserves GachaBase amber text');
-  await betaComponent(sectionsBeta.custom_id, kitBeta, ['textkit']);
+  const showTextBeta = kitBeta.components.flatMap(row => row.components).find(component => component.label === 'Show text');
+  await betaComponent(showTextBeta.custom_id, kitBeta);
   assert.equal((await observations('edit')).at(-1).body.embeds[0].image, undefined);
   assert.deepEqual((await observations('edit')).at(-1).body.attachments, []);
   assert.equal((await observations('beta-icon-source')).length, 1, 'Kit, comparison, text navigation, and sharing reuse the cached icon');
