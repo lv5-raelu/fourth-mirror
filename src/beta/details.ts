@@ -15,7 +15,7 @@ export function renderDescription(value: unknown, parameters: unknown): string {
   return formatDescription(value, parameters).text;
 }
 
-interface Block extends BetaDetailEntry { key: string; section: string }
+interface Block extends BetaDetailEntry { key: string; section: string; kind: 'description' | 'field' }
 function blocks(value: unknown, refs?: unknown, side: 'source' | 'target' = 'target'): Block[] {
   const dto = object(value), result: Block[] = [];
   const assets = object(object(refs).assets);
@@ -26,7 +26,7 @@ function blocks(value: unknown, refs?: unknown, side: 'source' | 'target' = 'tar
     return { type, name, ...(iconUrl ? { iconUrl } : {}) };
   };
   const add = (key: string, section: string, name: string, description: ReturnType<typeof formatDescription>, heading?: BetaHeading): void => {
-    if (description.text) result.push({ key, section, name, value: description.text,
+    if (description.text) result.push({ key, section, name, value: description.text, kind: 'description',
       ...(description.emphasis.length ? { emphasis: description.emphasis } : {}), ...(heading ? { heading } : {}) });
   };
   const skills = (value: unknown, prefix: string, group: string): void => {
@@ -67,7 +67,7 @@ function blocks(value: unknown, refs?: unknown, side: 'source' | 'target' = 'tar
     formatDescription(superimpositions.description, superimpositions.description_params));
   add('description', 'details', 'Description', formatDescription(dto.description, dto.description_params));
   for (const key of ['rarity', 'max_energy']) {
-    if (typeof dto[key] === 'number') add(key, 'details', key === 'rarity' ? 'Rarity' : 'Max Energy', formatDescription(String(dto[key]), undefined));
+    if (typeof dto[key] === 'number') result.push({ key, section: 'details', name: key === 'rarity' ? 'Rarity' : 'Max Energy', value: String(dto[key]), kind: 'field' });
   }
   return result;
 }
@@ -86,17 +86,17 @@ export function detailSections(before: unknown, after: unknown, rawChanges: { fi
       const after = cur ? (renamed ? cur.name + '\n' : '') + cur.value : null;
       const heading = cur?.heading ?? prev?.heading;
       const shifted = (block: Block) => block.emphasis!.map(range => ({ start: range.start + (renamed ? block.name.length + 1 : 0), end: range.end + (renamed ? block.name.length + 1 : 0) }));
-      changes.push({ name: cur?.name ?? prev!.name, value: `${before ?? 'Not present'}\n\n↓\n\n${after ?? 'Removed'}`, comparison: { before, after,
+      changes.push({ name: cur?.name ?? prev!.name, kind: cur?.kind ?? prev!.kind, value: `${before ?? 'Not present'}\n\n↓\n\n${after ?? 'Removed'}`, comparison: { before, after,
         ...(prev?.emphasis ? { beforeEmphasis: shifted(prev) } : {}), ...(cur?.emphasis ? { afterEmphasis: shifted(cur) } : {}) }, ...(heading ? { heading } : {}) });
     }
   }
   // Use explicit fields only when no readable description comparison is available.
-  const raw = rawChanges.map(change => ({ name: humanize(change.field), value: `${change.before ?? 'Not present'} → ${change.after ?? 'Removed'}`, comparison: { before: change.before, after: change.after } }));
+  const raw = rawChanges.map(change => ({ name: humanize(change.field), kind: 'field' as const, value: `${change.before ?? 'Not present'} → ${change.after ?? 'Removed'}`, comparison: { before: change.before, after: change.after } }));
   const sections: BetaSection[] = [{ id: 'changes', title: 'Changes', entries: changes.length ? changes : raw.length ? raw : [{ name: 'Comparison', value: compared
     ? 'No gameplay or text differences were found in the retrieved comparison. Gachabase may have updated assets or other metadata.'
     : 'No before/after comparison is available for this entry. Browse its current details below.' }] }];
   for (const [id, title] of [['kit', 'Skills & Passives'], ['traces', 'Traces'], ['eidolons', 'Eidolons'], ['details', 'Details']]) {
-    const entries = current.filter(block => block.section === id).map(({ name, value, heading, emphasis }) => ({ name, value, ...(heading ? { heading } : {}), ...(emphasis ? { emphasis } : {}) }));
+    const entries = current.filter(block => block.section === id).map(({ name, value, kind, heading, emphasis }) => ({ name, value, kind, ...(heading ? { heading } : {}), ...(emphasis ? { emphasis } : {}) }));
     if (entries.length) sections.push({ id: id!, title: title!, entries });
   }
   return sections;
