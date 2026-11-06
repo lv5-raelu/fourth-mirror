@@ -43,6 +43,7 @@ const control = (message: BetaMessage, kind: string): string => {
   assert.ok(component && 'custom_id' in component);
   return component.custom_id;
 };
+const state = (message: BetaMessage) => readView(control(message, 'section').replace(/:section$/, ':view'));
 function assertLimits(message: BetaMessage): void {
   let length = 0;
   for (const embed of message.embeds) {
@@ -110,16 +111,74 @@ test('navigates kits and paginates long descriptions completely within Discord l
   const { client } = fixture(1, 'long text 😀 \\ | '.repeat(800) + 'END OF DESCRIPTION');
   const overview = await overviewMessage(client, await client.feed());
   let message = await browseMessage(client, control(overview, 'entity'), ['0']);
-  message = await browseMessage(client, control(message, 'section'), ['textkit']);
+  message = await browseMessage(client, control(message, 'section'), ['kit']);
+  message = await browseMessage(client, control(message, 'mode'));
   const output: string[] = [];
   for (let pageIndex = 0; pageIndex < 40; pageIndex++) {
     assertLimits(message); output.push(...message.embeds[0]!.fields!.map(field => field.value));
     const next = components(message).find(component => component.type === 2 && component.label === 'Next');
     if (!next || !('custom_id' in next) || ('disabled' in next && next.disabled)) break;
+    assert.equal(readView(next.custom_id).mode, 'text');
     message = await browseMessage(client, next.custom_id);
   }
   assert.ok(output.join('').endsWith('END OF DESCRIPTION'));
   assert.ok(output.join('').includes('Deals 75% DMG.'));
+});
+
+test('uses one section menu and a persistent visual/text toggle across details, characters, overviews, and shared controls', async () => {
+  const { client } = fixture(2);
+  const overview = await overviewMessage(client, await client.feed());
+  const visual = await browseMessage(client, control(overview, 'entity'), ['0']);
+  assertLimits(visual);
+  const section = components(visual).find(component => component.type === 3 && component.custom_id.endsWith(':section'))!;
+  assert.ok(section.type === 3);
+  assert.deepEqual(section.options.map(option => option.value), ['changes', 'kit', 'traces', 'eidolons']);
+  assert.ok(section.options.every(option => !/\(Text\)|Text Comparison|All Changed Values/.test(option.label)));
+  assert.doesNotMatch(visual.embeds[0]!.description!, /Descriptions show|selectable text|Amber:|Red:|Green:/);
+  assert.ok(visual.files?.length);
+  assert.ok(components(visual).some(component => component.type === 2 && component.label === 'Show text'));
+
+  const text = await browseMessage(client, control(visual, 'mode'));
+  assertLimits(text);
+  assert.equal(text.files, undefined); assert.equal(text.embeds[0]!.image, undefined);
+  assert.match(text.embeds[0]!.fields![0]!.value, /50%[\s\S]*↓[\s\S]*75%/);
+  assert.equal(state(text).mode, 'text');
+  const kit = await browseMessage(client, control(text, 'section'), ['kit']);
+  assert.equal(kit.embeds[0]!.image, undefined);
+  assert.match(kit.embeds[0]!.fields![0]!.value, /75%/);
+  assert.ok(components(kit).some(component => component.type === 2 && component.label === 'Show visual'));
+  const publicKit = sharedMessage(kit);
+  const kitImage = await browseMessage(client, control(publicKit, 'mode'));
+  assert.ok(kitImage.files?.length); assertLimits(kitImage);
+  assert.equal(state(kitImage).section, 'kit');
+
+  const other = await browseMessage(client, control(kit, 'entity'), ['1']);
+  assert.equal(state(other).mode, 'text');
+  const back = components(other).find(component => component.type === 2 && component.label === 'Back to overview')!;
+  assert.ok('custom_id' in back);
+  const returned = await browseMessage(client, back.custom_id);
+  const reopened = await browseMessage(client, control(returned, 'entity'), ['0']);
+  assert.equal(state(reopened).mode, 'text');
+});
+
+test('accepts older controls, redirects removed character values, and reflects image permission fallback in the toggle', async () => {
+  const { client } = fixture();
+  for (const [old, section] of [['text', 'changes'], ['textkit', 'kit'], ['texttrace', 'traces'], ['texteid', 'eidolons']]) {
+    const parsed = readView(`beta:beta_9.0.51_100:0:${old}:3:view`);
+    assert.equal(parsed.section, section); assert.equal(parsed.mode, 'text');
+    assert.equal(readView(viewId(parsed, 'mode')).page, 0);
+    assert.equal(readView(viewId(parsed, 'mode')).mode, 'visual');
+  }
+  const oldValues = await browseMessage(client, 'beta:beta_9.0.51_100:0:values:3:view');
+  assert.equal(state(oldValues).section, 'changes');
+  const fallback = await browseMessage(client, 'beta:beta_9.0.51_100:0:kit:0:view', [], false);
+  assert.equal(fallback.embeds[0]!.image, undefined);
+  assert.match(fallback.embeds[0]!.description!, /Attach Files/);
+  const toggle = components(fallback).find(component => component.type === 2 && component.label === 'Show visual')!;
+  assert.ok('disabled' in toggle && toggle.disabled);
+  assert.equal(state(fallback).mode, 'text');
+  assertLimits(fallback);
+  assert.throws(() => readView('beta:beta_9.0.51_100:0:kit:0:invalid:mode'));
 });
 
 test('bounds worst-case overview payloads with several categories and long escaped text', async () => {
@@ -229,7 +288,7 @@ test('Node uploads rendered comparison pages and clears images when switching to
   assert.equal(payload.embeds[0]!.image?.url, 'attachment://beta-diff.png');
   assert.equal(payload.files[0]!.name, 'beta-diff.png');
   assert.deepEqual([...payload.files[0]!.attachment.slice(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
-  const plain = nodeInteraction(message, viewId({ revision: 'beta_9.0.51_100', entity: 0, section: 'text', page: 0 }));
+  const plain = nodeInteraction(message, viewId({ revision: 'beta_9.0.51_100', entity: 0, section: 'changes', page: 0 }, 'mode'));
   await handleBetaComponent(plain.interaction as unknown as MessageComponentInteraction, context(client));
   const text = plain.calls.at(-1)!.payload as { attachments: unknown[]; files: unknown[]; embeds: BetaMessage['embeds'] };
   assert.deepEqual(text.attachments, []); assert.deepEqual(text.files, []);
