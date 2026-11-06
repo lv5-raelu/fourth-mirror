@@ -1,12 +1,12 @@
 import type { ChatCompletionTool } from 'openai/resources/chat/completions';
-import { requestsSpoilerFreeAnswer, LoreLibrary, MAX_LORE_CHARACTERS } from './library.ts';
+import { requestsLoreConnection, requestsSpoilerFreeAnswer, LoreLibrary, MAX_LORE_CHARACTERS } from './library.ts';
 import type { LoreEntry } from './types.ts';
 import { hideSpoilerText, spoilerSpans } from '../chat/spoilers.ts';
 import { literalJson, renderSourceMarkers, requestsLoreSources, sourceLinksToMarkers } from '../chat/citations.ts';
 
 export const loreToolDefinition: ChatCompletionTool = { type: 'function', function: {
   name: 'lore_search',
-  description: 'Search the curated English Honkai: Star Rail library for worlds, cultures, food, lifeforms, political institutions, characters, technology, and history. Free local lookup; use for established lore and relevant concept connections before web search when context is missing. Coverage is selected, not exhaustive or live. Story entries are available by default: hide plot revelations with Discord spoiler tags. An explicit spoiler-free question filters them out.',
+  description: 'Search the curated English Honkai: Star Rail library for worlds, cultures, food, lifeforms, political institutions, characters, technology, and history. Free local lookup; use for requested lore or to verify a clearly relevant comparison, not just to add flavor to an unrelated answer. Search locally before web search for established lore. Coverage is selected, not exhaustive or live. Story entries are available by default: hide plot revelations with Discord spoiler tags. An explicit spoiler-free question filters them out.',
   parameters: { type: 'object', properties: { query: { type: 'string', maxLength: 240 } }, required: ['query'], additionalProperties: false },
 } };
 
@@ -27,9 +27,10 @@ export class LoreTurn {
 
   initial(question: string): string | undefined {
     const entries = this.#library.search(question.slice(0, 500), this.#story ? 'story' : 'setting');
-    if (entries.length || /\b(?:hsr|honkai\s*:?\s*star\s+rail|star\s+rail)\b/i.test(question)) return this.#encode(entries);
-    const connection = this.#library.connection(question);
-    return connection ? this.#encode(connection.entries, { concept: connection.concept, comparison: connection.comparison }) : undefined;
+    if (entries.length) return this.#encode(entries);
+    const connection = requestsLoreConnection(question) ? this.#library.connection(question) : undefined;
+    if (connection) return this.#encode(connection.entries, { concept: connection.concept, comparison: connection.comparison });
+    return /\b(?:hsr|honkai\s*:?\s*star\s+rail|star\s+rail)\b/i.test(question) ? this.#encode(entries) : undefined;
   }
 
   run(argumentsJson: string): string {

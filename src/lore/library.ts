@@ -21,6 +21,15 @@ function directQuestion(question: string): string {
   return question.replace(/```[\s\S]*?(?:```|$)|`[^`\r\n]*`/g, ' ').replace(/^\s*>.*$/gm, ' ').replace(/"(?:\\.|[^"\\])*"|“[^”]*”|‘[^’]*’|(?<![\p{L}\p{N}])'[^'\r\n]*'(?![\p{L}\p{N}])/gu, ' ');
 }
 
+/** Everyday keywords alone are not a request for an injected game comparison. */
+export function requestsLoreConnection(question: string): boolean {
+  const text = normalize(directQuestion(question)).slice(0, 4_000);
+  if (/\b(?:do not|don t|never|stop|avoid|skip|omit|tone down|cut back on)\b(?: \w+){0,6} (?:analogies|analogy|metaphors?|comparisons?|connections?)\b/.test(text)) return false;
+  return (/\b(?:hsr|honkai star rail|star rail)\b/.test(text) &&
+    /\b(?:analogy|analogies|metaphor|metaphors|compare|comparison|parallel|parallels|connection|connections|equivalent|relate)\b/.test(text)) ||
+    /\b(?:give|use|using|with|draw|suggest|make|provide|show|offer) (?:(?:me|us|an?|the|simple|brief|helpful|clear|everyday|good) ){0,4}(?:analogy|metaphor)\b/.test(text);
+}
+
 /** Honor an explicit spoiler-free request in the current question, not quoted/background text. */
 export function requestsSpoilerFreeAnswer(question: string): boolean {
   const text = normalize(directQuestion(question)).slice(0, 4_000);
