@@ -54,6 +54,7 @@ test('renders real amber pixels while whole changed values take red/green priori
   assert.match(current.svg, /fill="#f29e38">120%<\/tspan>/);
   assert.match(current.svg, /fill="#f29e38">2<\/tspan>/);
   const diff = diffImagePages(details.sections[0]!.entries)[0]!;
+  assert.doesNotMatch(diff.svg, /Source emphasis/);
   assert.match(diff.svg, /fill="#ff8b94" text-decoration="line-through">100%<\/tspan>/);
   assert.match(diff.svg, /fill="#83e3a4">120%<\/tspan>/);
   assert.match(diff.svg, /fill="#f29e38">2<\/tspan>/);

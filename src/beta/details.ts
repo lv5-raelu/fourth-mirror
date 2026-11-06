@@ -90,8 +90,7 @@ export function detailSections(before: unknown, after: unknown, rawChanges: { fi
         ...(prev?.emphasis ? { beforeEmphasis: shifted(prev) } : {}), ...(cur?.emphasis ? { afterEmphasis: shifted(cur) } : {}) }, ...(heading ? { heading } : {}) });
     }
   }
-  // Retain the explicit numeric diff as a separate section, including higher levels
-  // that might change while the first listed level's description stays the same.
+  // Use explicit fields only when no readable description comparison is available.
   const raw = rawChanges.map(change => ({ name: humanize(change.field), value: `${change.before ?? 'Not present'} → ${change.after ?? 'Removed'}`, comparison: { before: change.before, after: change.after } }));
   const sections: BetaSection[] = [{ id: 'changes', title: 'Changes', entries: changes.length ? changes : raw.length ? raw : [{ name: 'Comparison', value: compared
     ? 'No gameplay or text differences were found in the retrieved comparison. Gachabase may have updated assets or other metadata.'
@@ -100,6 +99,5 @@ export function detailSections(before: unknown, after: unknown, rawChanges: { fi
     const entries = current.filter(block => block.section === id).map(({ name, value, heading, emphasis }) => ({ name, value, ...(heading ? { heading } : {}), ...(emphasis ? { emphasis } : {}) }));
     if (entries.length) sections.push({ id: id!, title: title!, entries });
   }
-  if (changes.length && raw.length) sections.push({ id: 'values', title: 'All Changed Values', entries: raw });
   return sections;
 }

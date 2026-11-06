@@ -75,12 +75,18 @@ export class MockDiscord extends DurableObject {
         revision: { branch: 'beta', version: '9.0.51', design_revision: this.betaRevision, resource_revision: 80 },
         characters: [{ id: 1, name: { text: 'Test Mirror' }, status: 'updated', href: '/characters/1/test-mirror/beta',
           diff: `/diff/characters/1/test-mirror?prev=beta_9.0.51_99&cur=beta_9.0.51_${this.betaRevision}` }],
+        planarOrnaments: [{ id: 2, name: { text: 'Test Planar' }, status: 'updated', href: '/planar-ornaments/2/test-planar/beta',
+          diff: `/diff/planar-ornaments/2/test-planar?prev=beta_9.0.51_99&cur=beta_9.0.51_${this.betaRevision}` }],
       }] }));
       if (path === '/diff/characters/1/test-mirror/__data.json') return new Response(sourcePage({
         source: { dto: { skills: [{ id: 42, name: { text: 'Beam' }, type: { text: 'Skill' }, icon_path_hash: '123', description: { text: 'Deals <color=#f29e38ff>20</color> DMG.' } }] },
           refs: { assets: { '123-source': { url: 'https://cdn.gachabase.net/hsr/assets/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png', width: 1, height: 1 } } } },
         target: { dto: { skills: [{ id: 42, name: { text: 'Beam' }, type: { text: 'Skill' }, icon_path_hash: '123', description: { text: 'Deals <color=#f29e38ff>30</color> DMG.' } }] },
           refs: { assets: { '123-target': { url: 'https://cdn.gachabase.net/hsr/assets/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png', width: 1, height: 1 } } } },
+      }));
+      if (path === '/diff/planar-ornaments/2/test-planar/__data.json') return new Response(sourcePage({
+        source: { dto: { set_bonuses: [{ pieces: 2, description: { text: 'Increases ATK by <unbreak>#1[i]%</unbreak>.' }, description_params: [{ index: 0, values: [0.1] }] }] } },
+        target: { dto: { set_bonuses: [{ pieces: 2, description: { text: 'Increases ATK by <unbreak>#1[i]%</unbreak>.' }, description_params: [{ index: 0, values: [0.2] }] }] } },
       }));
       this.record('unexpected', { host: url.hostname, path, method: request.method });
       return new Response('Unexpected beta route', { status: 404 });

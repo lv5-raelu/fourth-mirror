@@ -65,7 +65,7 @@ export interface BetaFile { name: string; data: Uint8Array; description: string 
 export type BetaButton = { type: 2; style: 5; label: string; url: string }
   | { type: 2; style: 1 | 2; label: string; custom_id: string; disabled?: boolean };
 export type BetaRow = { type: 1; components: BetaButton[] }
-  | { type: 1; components: [{ type: 3; custom_id: string; placeholder: string;
+  | { type: 1; components: [{ type: 3; custom_id: string; placeholder: string; disabled?: boolean;
     options: { label: string; value: string; description?: string; default?: boolean }[] }] };
 
 export interface BetaHeading { type: string; name: string; iconUrl?: string }

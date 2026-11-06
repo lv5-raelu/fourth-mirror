@@ -1,7 +1,7 @@
 import { ChatError } from '../chat/types.ts';
 import { truncateDiscordText } from '../chat/messages.ts';
 import { latestMessage } from './presentation.ts';
-import { ENTITIES_PER_PAGE, entityMenu, pageButtons, readView, sectionMenu, viewId } from './navigation.ts';
+import { ENTITIES_PER_PAGE, entityMenu, modeMenu, pageButtons, readView, sectionMenu, viewId } from './navigation.ts';
 import type { BetaMode, BetaView } from './navigation.ts';
 import type { BetaClient } from './source.ts';
 import { entitySourceUrl } from './source.ts';
@@ -92,9 +92,9 @@ export async function browseMessage(client: BetaClient, customId: string, values
   let details: Awaited<ReturnType<BetaClient['entityDetails']>>;
   try { details = await client.entityDetails(entity, revision); }
   catch { return unavailableMessage(view, revision, feed); }
-  const sections = details.sections.filter(section => entity.category !== 'Characters' || section.id !== 'values');
-  // Older character menus may still point to the removed raw-values section.
-  if (entity.category === 'Characters' && view.section === 'values') { view.section = 'changes'; view.page = 0; }
+  const sections = details.sections;
+  // Older menus for any category may still point to the removed raw-values section.
+  if (view.section === 'values') { view.section = 'changes'; view.page = 0; }
   const section = sections.find(section => section.id === view.section);
   if (!section) throw new ChatError('That section is no longer available. Select the character or item again.');
   let imagePages: ReturnType<typeof diffImagePages> = [];
@@ -128,10 +128,9 @@ export async function browseMessage(client: BetaClient, customId: string, values
     ...(file ? { image: { url: 'attachment://beta-diff.png' } } : { fields: pages[view.page]! }),
     footer: { text: 'Gachabase • Unofficial beta data • Subject to change • Checked' }, timestamp: new Date(feed.checkedAt).toISOString() }],
     ...(file ? { files: [file] } : {}),
-    components: [...entityMenu(revision, view, Math.floor(view.entity / ENTITIES_PER_PAGE)), sectionMenu(view, sections),
+    components: [...entityMenu(revision, view, Math.floor(view.entity / ENTITIES_PER_PAGE)), sectionMenu(view, sections), modeMenu(view, !imagesAllowed),
       ...(count > 1 ? [pageButtons(view, count)] : []), { type: 1, components: [
         { type: 2, style: 2, label: 'Back to overview', custom_id: viewId({ ...view, entity: -1, section: 'overview', page: Math.floor(view.entity / ENTITIES_PER_PAGE) }) },
-        { type: 2, style: 2, label: view.mode === 'text' ? 'Show visual' : 'Show text', custom_id: viewId(view, 'mode'), disabled: view.mode === 'text' && !imagesAllowed },
         { type: 2, style: 2, label: 'Share to channel', custom_id: viewId(view, 'share') },
         { type: 2, style: 5, label: 'View source', url: entitySourceUrl(entity, revision) },
       ] }] };

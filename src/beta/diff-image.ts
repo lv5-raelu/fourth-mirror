@@ -114,7 +114,7 @@ export function diffImagePages(entries: BetaDetailEntry[]): DiffImagePage[] {
       y += 76;
       draw(newPage.length ? newPage : [[{ text: '(Earlier text shown on previous page)', changed: false }]], diffColors.added);
       y += 24;
-      body.push(`<text x="36" y="${y}" font-size="19"><tspan fill="${diffColors.removed}">− Removed</tspan><tspan fill="${diffColors.muted}">   →   </tspan><tspan fill="${diffColors.added}">+ Added</tspan><tspan fill="${diffColors.muted}">   ·   </tspan><tspan fill="${diffColors.emphasis}">Source emphasis</tspan></text>`);
+      body.push(`<text x="36" y="${y}" font-size="19"><tspan fill="${diffColors.removed}">− Removed</tspan><tspan fill="${diffColors.muted}">   →   </tspan><tspan fill="${diffColors.added}">+ Added</tspan></text>`);
       const height = y + 34;
       const plain = (lines: ImageRun[][]): string => lines.map(line => line.map(run => run.text).join('')).join('\n');
       const text = `${entry.name}\n${plain(oldPage)}\n↓\n${plain(newPage)}`;
