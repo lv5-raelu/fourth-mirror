@@ -350,6 +350,8 @@ test('dedicated source context preserves persona and English while disabling gen
   const messages = received.messages as { role: string; content: string }[];
   assert.match(messages[0]!.content, /Fourth Mirror persona/);
   assert.match(messages[0]!.content, /untrusted reference data/);
+  assert.match(messages[0]!.content, /Do not mention raw field-value changes/);
+  assert.match(messages[0]!.content, /Use gameplay numbers only when explicitly present in those descriptions/);
   assert.ok(messages[0]!.content.includes(responseStyleInstructions));
   assert.ok(messages[0]!.content.includes(responseLanguageInstructions));
   assert.ok(messages[0]!.content.endsWith(safetyInstructions));

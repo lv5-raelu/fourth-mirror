@@ -207,17 +207,25 @@ export class BetaClient {
       const url = entity.diffUrl ?? entity.url;
       try {
         const parsed = await this.entityDetails(entity, undefined, signal);
+        // Give answers the compiled descriptions, never the flattened fields or
+        // raw comparison fallback used when a readable tooltip is unavailable.
+        const description = (text: string): string => text.replace(/\[parameter \d+ unavailable\]/g, '[not specified]').slice(0, 1_000);
         const compact = { name: entity.name, url, from: parsed.from, to: parsed.to,
-          changes: parsed.changes.slice(0, 40).map(change => ({ ...change, before: change.before?.slice(0, 1_000) ?? null, after: change.after?.slice(0, 1_000) ?? null })),
-          current: parsed.current.slice(0, 40).map(field => ({ ...field, value: field.value.slice(0, 1_000) })) };
-        while (JSON.stringify(compact).length > 8_000 && compact.current.length) compact.current.pop();
-        while (JSON.stringify(compact).length > 8_000 && compact.changes.length > 1) compact.changes.pop();
+          descriptionChanges: parsed.sections.find(section => section.id === 'changes')!.entries
+            .filter(entry => entry.kind === 'description' && entry.comparison).slice(0, 40)
+            .map(entry => ({ name: entry.name.slice(0, 180), before: entry.comparison!.before === null ? null : description(entry.comparison!.before),
+              after: entry.comparison!.after === null ? null : description(entry.comparison!.after) })),
+          currentDescriptions: parsed.sections.filter(section => section.id !== 'changes')
+            .flatMap(section => section.entries.filter(entry => entry.kind === 'description')
+              .map(entry => ({ section: section.title, name: entry.name.slice(0, 180), description: description(entry.value) }))).slice(0, 40) };
+        while (JSON.stringify(compact).length > 8_000 && compact.currentDescriptions.length) compact.currentDescriptions.pop();
+        while (JSON.stringify(compact).length > 8_000 && compact.descriptionChanges.length > 1) compact.descriptionChanges.pop();
         return compact;
       } catch { return { name: entity.name, url, unavailable: true }; }
     }));
     const content = JSON.stringify({ source: 'Gachabase HSR beta archive; unofficial and subject to change', checkedAt: new Date(feed.checkedAt).toISOString(), stale: Boolean(feed.stale),
       revisions: feed.revisions.slice(0, 4).map(revision => ({ version: revision.version, designRevision: revision.revision, entities: revision.entities.slice(0, 12).map(entity => ({ name: entity.name, category: entity.category, status: entity.status })) })),
-      details, coverage: 'Only these revisions and matched entity details were retrieved. An updated entry alone does not establish a buff or nerf. Numeric IDs and tooltip references are not stat percentages or damage values. Missing values are unknown, not zero. Some long details and revision listings may be truncated.' });
+      details, coverage: 'Only these revisions and matched entity descriptions were retrieved. An updated entry alone does not establish a buff or nerf. Empty descriptionChanges does not prove the kit is unchanged; a readable comparison may be unavailable. Missing information is unknown, not zero. Some long descriptions and revision listings may be truncated.' });
     return { feed, source: { title: 'Honkai: Star Rail beta archive', url: BETA_URL, content, checkedAt: feed.checkedAt } };
   }
 

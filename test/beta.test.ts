@@ -57,12 +57,71 @@ test('coalesces cached reads, keeps stale data on an outage, and queries only ma
   assert.equal(urls.length, 2);
   assert.ok(urls.every(url => url.origin === 'https://hsr.gachabase.net' && url.searchParams.get('lang') === 'en'));
   const data = JSON.parse(result.source.content);
-  assert.equal(data.details[0].changes[0].after, '120');
+  assert.deepEqual(data.details[0].descriptionChanges, []);
+  assert.deepEqual(data.details[0].currentDescriptions, []);
+  assert.ok(!('changes' in data.details[0]) && !('current' in data.details[0]));
   await client.question('Test Mirror changes again');
   assert.equal(urls.length, 2);
   now += 6 * 60_000; failing = true;
   assert.equal((await client.feed()).stale, true);
   await assert.rejects(client.feed(true), /unavailable/);
+});
+
+test('questions use resolved, named descriptions for every category without raw paths, arrays, IDs, or metadata deltas', async () => {
+  const params = (power: number) => [{ index: 0, values: [power, 0.987654321] }];
+  const ability = (power: number) => ({ id: 987654321, name: { text: 'Beam' }, type: { text: 'Skill' },
+    description: { text: 'Deals <color=#f29e38ff>#1[i]%</color> DMG.' }, description_params: params(power), internal_multiplier: power * 999 });
+  const effect = (power: number) => ({ name: { text: 'Effect' }, description: { text: 'Gain #1[i]% ATK.' }, description_params: params(power) });
+  const bonuses = (power: number) => ({ set_bonuses: [{ pieces: 2, ...effect(power) }] });
+  const examples = [
+    { key: 'characters', path: 'characters', dto: (power: number) => ({ skills: [ability(power)],
+      global_passives: [ability(power)], memosprite: { skills: [ability(power)] },
+      skill_tree: [{ id: 987654321, levels: [effect(power)] }], eidolons: [{ id: 987654321, level: 1, ...effect(power) }] }) },
+    { key: 'lightcones', path: 'lightcones', dto: (power: number) => ({ superimpositions: effect(power) }) },
+    { key: 'relics', path: 'relics', dto: bonuses },
+    { key: 'planarOrnaments', path: 'planar-ornaments', dto: bonuses },
+    { key: 'items', path: 'items', dto: (power: number) => ({ description: { text: 'Restore #1[i]% HP.' }, description_params: params(power) }) },
+  ];
+  for (const example of examples) {
+    const feed = page({ revisions: [{ revision: revision().revision, [example.key]: [{ id: 1, name: { text: 'Test Mirror' }, status: 'updated',
+      href: `/${example.path}/1/test-mirror/beta`, diff: `/diff/${example.path}/1/test-mirror?prev=beta_9.0.51_99&cur=beta_9.0.51_100` }] }] });
+    const comparison = page({ source: { dto: { ...example.dto(0.1), rarity: 4, max_energy: 100, debug_values: ['BEFORE_RAW_SENTINEL'] } },
+      target: { dto: { ...example.dto(0.2), rarity: 5, max_energy: 200, debug_values: ['AFTER_RAW_SENTINEL'] } } });
+    const client = new BetaClient(async input => new Response(new URL(String(input)).pathname.includes('/changelog/') ? feed : comparison));
+    const result = await client.question('What changed for Test Mirror?');
+    const detail = JSON.parse(result.source.content).details[0];
+    assert.ok(detail.descriptionChanges.length > 0, example.key);
+    assert.ok(detail.descriptionChanges.every((change: { name: string; before: string; after: string }) => change.name && /10%/.test(change.before) && /20%/.test(change.after)));
+    assert.ok(detail.currentDescriptions.length > 0, example.key);
+    assert.ok(detail.currentDescriptions.every((entry: { name: string; description: string }) => entry.name && /20%/.test(entry.description)));
+    assert.ok(!('changes' in detail) && !('current' in detail));
+    assert.doesNotMatch(result.source.content, /RAW_SENTINEL|description_params|internal_multiplier|987654321|\[id=|"field"|Max Energy|Rarity/);
+  }
+});
+
+test('questions omit higher-level and raw-only changes even when browsing uses the raw comparison fallback', async () => {
+  const dto = (higher: number) => ({ skills: [{ id: 42, name: { text: 'Beam' }, type: { text: 'Skill' },
+    description: { text: 'Deals #1[i]% DMG.' }, description_params: [{ index: 0, values: [0.1, higher] }] }] });
+  const comparison = page({ source: { dto: dto(0.987654321) }, target: { dto: dto(0.876543219) } });
+  assert.ok(parseDetails(comparison).sections[0]!.entries.some(entry => entry.kind === 'field' && entry.comparison));
+  const client = new BetaClient(async input => new Response(new URL(String(input)).pathname.includes('/changelog/') ? feedBody() : comparison));
+  const result = await client.question('What changed for Test Mirror?');
+  const detail = JSON.parse(result.source.content).details[0];
+  assert.deepEqual(detail.descriptionChanges, []);
+  assert.deepEqual(detail.currentDescriptions, [{ section: 'Skills & Passives', name: 'Skill · Beam', description: 'Deals 10% DMG.' }]);
+  assert.doesNotMatch(result.source.content, /987654321|876543219|description_params|"field"/);
+  assert.match(JSON.parse(result.source.content).coverage, /Empty descriptionChanges does not prove the kit is unchanged/);
+});
+
+test('question descriptions retain additions and removals and omit unresolved parameter identifiers', async () => {
+  const comparison = page({ source: { dto: { skills: [{ id: 42, name: { text: 'Old skill' }, description: { text: 'Old effect.' } }] } },
+    target: { dto: { skills: [{ id: 43, name: { text: 'New skill' }, description: { text: 'Gain #3[i] charges.' } }] } } });
+  const client = new BetaClient(async input => new Response(new URL(String(input)).pathname.includes('/changelog/') ? feedBody() : comparison));
+  const result = await client.question('Test Mirror changes');
+  const detail = JSON.parse(result.source.content).details[0];
+  assert.deepEqual(detail.descriptionChanges, [{ name: 'Old skill', before: 'Old effect.', after: null },
+    { name: 'New skill', before: null, after: 'Gain [not specified] charges.' }]);
+  assert.doesNotMatch(result.source.content, /#3\[i\]|parameter 3/);
 });
 
 function monitorFixture() {

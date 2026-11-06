@@ -554,7 +554,13 @@ try {
   const betaModel = (await observations('model')).at(-1).body;
   assert.ok(!betaModel.tools, 'Source-grounded queries should not trigger generic web tools');
   const grounding = JSON.parse(betaModel.messages.at(-2).content).source_context;
-  assert.equal(JSON.parse(grounding.content).details[0].changes[0].after, 'Deals 30 DMG.');
+  const betaDescriptions = JSON.parse(grounding.content).details;
+  assert.deepEqual(betaDescriptions[0].descriptionChanges, [{ name: 'Skill · Beam', before: 'Deals 20 DMG.', after: 'Deals 30 DMG.' }]);
+  assert.deepEqual(betaDescriptions[0].currentDescriptions, [{ section: 'Skills & Passives', name: 'Skill · Beam', description: 'Deals 30 DMG.' }]);
+  assert.deepEqual(betaDescriptions[1].descriptionChanges, [{ name: '2-piece bonus', before: 'Increases ATK by 10%.', after: 'Increases ATK by 20%.' }]);
+  assert.ok(betaDescriptions.every(detail => !('changes' in detail) && !('current' in detail)));
+  assert.doesNotMatch(grounding.content, /"field"|description_params|\[id=/);
+  assert.match(betaModel.messages[0].content, /Do not mention raw field-value changes/);
   assert.match((await observations('edit')).at(-1).body.embeds[0].title, /Beta Inquiry/);
   const answerBeta = (await observations('edit')).at(-1).body;
   const aiBeforeShare = (await observations('model')).length;
