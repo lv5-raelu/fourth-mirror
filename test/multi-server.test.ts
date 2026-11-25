@@ -62,6 +62,7 @@ test('server alerts use separate baselines, queues, delivery nonces, and enable 
     reads++;
     return new Response(JSON.stringify({ type: 'data', nodes: [{ type: 'data', data: JSON.parse(stringify({ data: { revisions: [{
       revision: { branch: 'beta', version: '9.0.51', design_revision: design, resource_revision: 80 },
+      characters: [{ id: 1, name: { text: 'Test Mirror' }, status: 'updated', href: '/characters/1/test-mirror/beta' }],
     }] } })) }] }));
   }, () => now);
   const servers = new ServerBeta(client, await BetaFileStore.open(path), () => now);

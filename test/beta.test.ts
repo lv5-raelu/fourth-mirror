@@ -3,8 +3,9 @@ import { test } from 'node:test';
 import { stringify } from 'devalue';
 import { BetaClient, parseDetails, parseFeed } from '../src/beta/source.ts';
 import { BetaMonitor, BETA_POLL_MS } from '../src/beta/monitor.ts';
-import type { BetaAlertState, BetaStateStore } from '../src/beta/types.ts';
+import type { BetaAlertState, BetaMessage, BetaStateStore } from '../src/beta/types.ts';
 import { latestMessage } from '../src/beta/presentation.ts';
+import { browseMessage } from '../src/beta/browser.ts';
 import { betaChannelPermissions } from '../src/beta/permissions.ts';
 import { executeBeta } from '../src/beta/feature.ts';
 
@@ -133,6 +134,41 @@ function monitorFixture() {
     update: () => { design++; }, fail: (value: boolean) => { failing = value; }, now: () => now };
 }
 
+test('/beta latest opens the newest revision with tracked changes and pins its selector to that revision', async () => {
+  const { monitor } = monitorFixture();
+  const emptyRevision = (design: number) => ({ ...revision(design), characters: [] });
+  let revisions = [revision(100), emptyRevision(103), revision(101), emptyRevision(102)];
+  const reads: URL[] = [];
+  const client = new BetaClient(async input => {
+    const url = new URL(String(input));
+    reads.push(url);
+    return new Response(url.pathname.includes('/changelog/') ? page({ revisions }) : diffBody());
+  });
+  const replies: BetaMessage[] = [];
+  const latest = () => executeBeta({ action: 'latest', userId: guild, canManage: false }, { client, monitor }, null,
+    async reply => { replies.push(reply); }, async () => { assert.fail('Latest does not configure a notification channel'); });
+
+  await latest();
+  const message = replies[0]!;
+  assert.equal(message.embeds[0]!.fields!.find(field => field.name === 'Design revision')?.value, '101');
+  const selector = message.components?.[0]?.components[0];
+  assert.ok(selector?.type === 3);
+  assert.deepEqual(selector.options.map(option => option.label), ['Test Mirror']);
+  assert.match(selector.custom_id, /beta_9\.0\.51_101/);
+  const details = await browseMessage(client, selector.custom_id, ['0'], false);
+  assert.match(details.embeds[0]!.description!, /Rev\. 101/);
+  assert.deepEqual(reads.filter(url => url.pathname.includes('/diff/')).map(url => url.searchParams.get('cur')), ['beta_9.0.51_101']);
+
+  revisions = [emptyRevision(103), emptyRevision(102)];
+  await client.feed(true);
+  await latest();
+  const empty = replies[1]!;
+  assert.match(empty.embeds[0]!.description!, /No tracked character or item changes/);
+  const archive = empty.components?.[0]?.components[0];
+  assert.ok(archive?.type === 2 && archive.style === 5);
+  assert.equal(empty.components?.flatMap(row => [...row.components]).length, 1);
+});
+
 test('notifications start with a baseline, announce new revisions once, survive restart, and ignore source failures', async () => {
   const fixture = monitorFixture();
   const posts: string[] = [];
@@ -153,6 +189,40 @@ test('notifications start with a baseline, announce new revisions once, survive 
   assert.deepEqual(posts, ['beta_9.0.51_101', 'beta_9.0.51_102']);
   await restarted.configure(null); fixture.advance(); fixture.update(); await restarted.check(send);
   assert.equal(posts.length, 2);
+});
+
+test('notifications silently checkpoint empty revisions and group only revisions with tracked changes', async () => {
+  const fixture = monitorFixture();
+  const posts: number[][] = [];
+  const emptyRevision = (design: number) => ({ ...revision(design), characters: [] });
+  const check = (...revisions: ReturnType<typeof revision>[]) => fixture.monitor.check(
+    async (_channel, announced) => { posts.push(announced.map(value => value.revision)); },
+    async () => parseFeed(page({ revisions }), fixture.now()),
+  );
+  await fixture.monitor.configure(channel);
+
+  fixture.advance();
+  await check(emptyRevision(101));
+  assert.deepEqual(posts, []);
+  const afterEmpty = await fixture.monitor.status();
+  assert.equal(afterEmpty.checkpoint?.revision, 101);
+  assert.equal(afterEmpty.lastCheckedAt, fixture.now());
+  assert.equal(afterEmpty.lastAnnouncedAt, null);
+  assert.equal(afterEmpty.deliveryPending, false);
+
+  fixture.advance();
+  await check(emptyRevision(105), revision(104), emptyRevision(103), revision(102), emptyRevision(101));
+  assert.deepEqual(posts, [[104, 102]]);
+  const afterMixed = await fixture.monitor.status();
+  assert.equal(afterMixed.checkpoint?.revision, 105);
+  assert.equal(afterMixed.lastAnnouncedAt, fixture.now());
+
+  fixture.advance();
+  await check(emptyRevision(106), emptyRevision(105), revision(104));
+  assert.deepEqual(posts, [[104, 102]]);
+  const afterNextEmpty = await fixture.monitor.status();
+  assert.equal(afterNextEmpty.checkpoint?.revision, 106);
+  assert.equal(afterNextEmpty.lastAnnouncedAt, afterMixed.lastAnnouncedAt);
 });
 
 test('unconfirmed deliveries are not repeated after restart and a different configured server starts disabled', async () => {

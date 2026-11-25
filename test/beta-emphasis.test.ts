@@ -72,12 +72,12 @@ test('renders real amber pixels while whole changed values take red/green priori
   }
 });
 
-test('keeps emphasis through wrapped continuation pages and escapes decoded source markup', () => {
+test('keeps emphasis through long wrapped descriptions and escapes decoded source markup', () => {
   const description = formatDescription('😀 Opening. <color=#f29e38ff>' + 'Critical value 12.5% &amp; bonus. '.repeat(200) + '</color> FINAL SENTENCE', []);
   const pages = currentImagePages([{ name: 'Long passive', value: description.text, emphasis: description.emphasis }]);
-  assert.ok(pages.length > 3);
-  assert.ok(pages.every(page => page.height <= 1_600 && /fill="#f29e38">Critical/.test(page.svg)));
-  assert.match(pages.map(page => page.text).join('\n'), /FINAL\s+SENTENCE/);
+  assert.equal(pages.length, 1);
+  assert.match(pages[0]!.svg, /fill="#f29e38">Critical/);
+  assert.match(pages[0]!.text, /FINAL\s+SENTENCE$/);
   const unsafe = formatDescription('<color=#f29e38ff>&lt;image href=&quot;https://private.invalid/&quot;/&gt;</color>', []);
   const image = currentImagePages([{ name: 'Unsafe source', value: unsafe.text, emphasis: unsafe.emphasis }])[0]!;
   assert.ok(!image.svg.includes('<image ') && image.svg.includes('&lt;image'));

@@ -79,12 +79,12 @@ test('renders the actual PNG to the left of a two-line type/name heading in comp
   assert.equal(calls, 1, 'Current and comparison views share the same cached asset');
 });
 
-test('current ability pages keep the icon on continuations and preserve the end of long descriptions', () => {
+test('a long current ability keeps its icon and full description in one image', () => {
   const pages = currentImagePages([{ name: 'Talent · Long passive', heading: { type: 'Talent', name: 'Long passive', iconUrl }, value: 'A long description. '.repeat(500) + 'FINAL SENTENCE' }]);
-  assert.ok(pages.length > 1);
-  assert.ok(pages.every(page => page.iconUrl === iconUrl && page.height <= 1_600));
-  assert.match(pages.map(page => page.text).join(' '), /FINAL\s+SENTENCE/);
-  assert.ok(pages.every(page => !page.text.includes('↓')));
+  assert.equal(pages.length, 1);
+  assert.equal(pages[0]!.iconUrl, iconUrl);
+  assert.match(pages[0]!.text, /FINAL\s+SENTENCE$/);
+  assert.ok(!pages[0]!.text.includes('↓'));
 });
 
 test('an unavailable icon leaves a complete rendered comparison with its readable heading', async t => {

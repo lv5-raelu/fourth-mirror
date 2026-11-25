@@ -39,6 +39,13 @@ export function latestMessage(feed: BetaFeed, notifications?: BetaRevision[], re
       { type: 1, components: [{ type: 2, style: 2, label: 'Share to channel', custom_id: viewId(view, 'share') }, ...linkButton.components] }] };
 }
 
+export function noTrackedChangesMessage(feed: BetaFeed): BetaMessage {
+  const description = feed.stale ? 'No tracked character or item changes were found in the cached revisions. Gachabase could not be refreshed.'
+    : 'No tracked character or item changes were found in the recent beta archive.';
+  return { embeds: [{ title: 'Fourth Mirror’s Beta Archive', description, url: BETA_URL, color, footer, timestamp: new Date(feed.checkedAt).toISOString() }],
+    components: [linkButton] };
+}
+
 export function answerMessage(text: string, feed: BetaFeed): BetaMessage {
   const revision = feed.revisions[0]!;
   const description = truncateDiscordText(text.trim(), 3_800, '\n\n*Answer shortened.*');

@@ -87,6 +87,38 @@ test('compiles readable before/after changes, kits, traces, eidolons, Light Cone
   assert.ok(added.sections.find(section => section.id === 'details')!.entries.some(entry => entry.value === 'Gain 6%.'));
 });
 
+test('navigates changed abilities in Gachabase order with one visual page per ability', async () => {
+  const ability = (id: number, type: string, name: string) => ({ id, type: { text: type }, name: { text: name },
+    description: { text: `Original effect. ${name === 'Opening' ? 'A long ability description. '.repeat(60) : ''}` } });
+  const skills = [ability(1, 'Basic ATK', 'Opening'), ability(2, 'Skill', 'Frostbeam'), ability(3, 'Ultimate', 'Nova'),
+    ability(4, 'Talent', 'Removed Talent'), ability(7, 'Technique', 'Glide')];
+  const enhanced = ability(8, 'Basic ATK', 'Enhanced Opening');
+  const memosprite = { skills: [ability(11, 'Memosprite Talent', 'Echo'), ability(12, 'Memosprite Skill', 'Call')] };
+  const updated = (skill: ReturnType<typeof ability>) => ({ ...skill, description: { text: skill.description.text.replace('Original', 'Updated') } });
+  const source = { dto: { skills, memosprite } };
+  const target = { dto: { skills: [...skills.filter(skill => skill.id !== 4).map(updated), enhanced], memosprite: { skills: memosprite.skills.map(updated) } } };
+  const comparison = page({ source, target });
+  const parsed = parseDetails(comparison);
+  const expected = ['Opening', 'Enhanced Opening', 'Frostbeam', 'Nova', 'Removed Talent', 'Glide', 'Call', 'Echo'];
+  assert.deepEqual(parsed.sections[0]!.entries.map(entry => entry.heading!.name), expected);
+  assert.deepEqual(parsed.sections.find(section => section.id === 'kit')!.entries.map(entry => entry.heading!.name), expected.filter(name => name !== 'Removed Talent'));
+
+  const client = new BetaClient(async input => new Response(new URL(String(input)).pathname.includes('/changelog/')
+    ? page({ revisions: [revision()] }) : comparison));
+  const overview = await overviewMessage(client, await client.feed());
+  const first = await browseMessage(client, control(overview, 'entity'), ['0']);
+  assert.match(first.embeds[0]!.description!, /Changes · Page 1\/8/);
+  assert.match(first.files![0]!.description, /^Basic ATK · Opening\n/);
+  const next = components(first).find(component => component.type === 2 && component.label === 'Next');
+  assert.ok(next && 'custom_id' in next);
+  const second = await browseMessage(client, next.custom_id);
+  assert.match(second.files![0]!.description, /^Basic ATK · Enhanced Opening\n/);
+
+  const { source: grounding } = await client.question('What changed for Mirror 0?');
+  const changes = JSON.parse(grounding.content).details[0].descriptionChanges;
+  assert.deepEqual(changes.map(({ name }: { name: string }) => name.split(' · ').at(-1)), expected);
+});
+
 test('overviews contain real changes and every entity remains reachable across menu pages', async () => {
   const { client, reads } = fixture(43);
   let message = await overviewMessage(client, await client.feed());
@@ -112,7 +144,8 @@ test('navigates kits and paginates long descriptions completely within Discord l
   const overview = await overviewMessage(client, await client.feed());
   let message = await browseMessage(client, control(overview, 'entity'), ['0']);
   message = await browseMessage(client, control(message, 'section'), ['kit']);
-  assert.equal(message.components!.length, 5, 'Three dropdowns, pagination, and actions fit within the five-row limit');
+  assert.match(message.embeds[0]!.description!, /Skills & Passives · Page 1\/1/);
+  assert.equal(message.files?.length, 1);
   message = await browseMessage(client, control(message, 'format'), ['text']);
   const output: string[] = [];
   for (let pageIndex = 0; pageIndex < 40; pageIndex++) {

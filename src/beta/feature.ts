@@ -1,8 +1,9 @@
 import { ChatError } from '../chat/types.ts';
 import type { ChatService } from '../chat/service.ts';
 import type { BetaClient } from './source.ts';
+import { hasTrackedChanges } from './source.ts';
 import type { BetaMonitor } from './monitor.ts';
-import { alertsMessage, answerMessage } from './presentation.ts';
+import { alertsMessage, answerMessage, noTrackedChangesMessage } from './presentation.ts';
 import { overviewMessage } from './browser.ts';
 import type { BetaFeed, BetaMessage } from './types.ts';
 
@@ -18,7 +19,12 @@ export interface BetaRequest {
 
 export async function executeBeta(request: BetaRequest, feature: BetaFeature, chat: ChatService | null,
   edit: (message: BetaMessage) => Promise<void>, validateChannel: (channelId: string) => Promise<void>): Promise<void> {
-  if (request.action === 'latest') { await edit(await overviewMessage(feature.client, await feature.client.feed())); return; }
+  if (request.action === 'latest') {
+    const feed = await feature.client.feed();
+    const revision = feed.revisions.find(hasTrackedChanges);
+    await edit(revision ? await overviewMessage(feature.client, { ...feed, revisions: [revision] }) : noTrackedChangesMessage(feed));
+    return;
+  }
   if (request.action === 'ask') {
     if (!chat) throw new ChatError('AI chat is not configured. You can still use /beta latest to browse the archive.');
     const question = request.question?.trim();

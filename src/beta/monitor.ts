@@ -1,4 +1,4 @@
-import { BetaClient, compareRevisions } from './source.ts';
+import { BetaClient, compareRevisions, hasTrackedChanges } from './source.ts';
 import type { BetaAlertState, BetaFeed, BetaRevision, BetaStateStore } from './types.ts';
 
 export const BETA_POLL_MS = 10 * 60_000;
@@ -54,26 +54,33 @@ export class BetaMonitor {
         state.lastError = 'A previous announcement could not be confirmed. It will not be reposted automatically; use /beta latest.';
       }
       await this.store.save(state);
-      let revisions: BetaRevision[];
+      let newRevisions: BetaRevision[];
       try {
         const feed = await readFeed();
         state.lastCheckedAt = feed.checkedAt;
         if (state.lastError?.startsWith('Gachabase could not be checked.')) state.lastError = null;
-        revisions = feed.revisions.filter(revision => state.checkpoint && compareRevisions(revision, state.checkpoint) > 0);
-        if (!revisions.length) { await this.store.save(state); return; }
+        newRevisions = feed.revisions.filter(revision => state.checkpoint && compareRevisions(revision, state.checkpoint) > 0);
       } catch {
         state.lastError = 'Gachabase could not be checked. The last good revision is retained; checking will resume automatically.';
         await this.store.save(state);
         return;
       }
+      // Advance the checkpoint even when the latest revision has no tracked changes.
+      const latest = newRevisions[0];
+      if (latest) state.checkpoint = { ...latest, entities: [] };
+      const revisions = newRevisions.filter(hasTrackedChanges);
+      const announcement = revisions[0];
+      if (!announcement) {
+        await this.store.save(state);
+        return;
+      }
       // Persist the watermark and delivery reservation before posting. A restart cannot flood duplicates.
-      state.checkpoint = { ...revisions[0]!, entities: [] };
       state.deliveryPending = true;
       state.lastError = null;
       await this.store.save(state);
       try {
         // Discord deduplicates nonces per author, so the destination must be part of the identity.
-        const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${this.guildId}:${state.channelId}:${revisions[0]!.key}`));
+        const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${this.guildId}:${state.channelId}:${announcement.key}`));
         const nonce = 'b' + [...new Uint8Array(digest).slice(0, 12)].map(byte => byte.toString(16).padStart(2, '0')).join('');
         await send(state.channelId, revisions, state.lastCheckedAt!, nonce);
         state.lastAnnouncedAt = this.now();

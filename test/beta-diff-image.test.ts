@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import UPNG from 'upng-js';
 import { wordDiff } from '../src/beta/diff.ts';
-import { diffImagePages } from '../src/beta/diff-image.ts';
+import { diffImagePages, MAX_DIFF_IMAGE_HEIGHT } from '../src/beta/diff-image.ts';
 import { renderDiffImage } from '../src/beta/render.ts';
 import { prepareSharedMessage } from '../src/beta/share-image.ts';
 import type { BetaMessage } from '../src/beta/types.ts';
@@ -42,17 +42,23 @@ test('handles additions, removals, and rewritten paragraphs without losing origi
   assert.deepEqual(changed(precise.after), ['120%', '3']);
 });
 
-test('paginates both sides of long comparisons without exceeding the image bounds or dropping the ending', () => {
+test('renders both sides of a long comparison on one bounded, shareable PNG', async () => {
   const before = 'A long unchanged paragraph. '.repeat(300) + '100% END';
   const after = 'A long unchanged paragraph. '.repeat(300) + '120% END';
   const pages = diffImagePages([entry(before, after)]);
-  assert.ok(pages.length > 5);
-  assert.ok(pages.every(page => page.width === 1_000 && page.height <= 1_600));
-  const text = pages.map(page => page.text).join('\n');
-  assert.match(text, /100%\s+END/); assert.match(text, /120%\s+END/);
-  assert.ok(pages.every(page => !page.svg.includes('Before:') && !page.svg.includes('After:')));
-  assert.match(pages.at(-1)!.svg, />100%<\/tspan>/);
-  assert.match(pages.at(-1)!.svg, />120%<\/tspan>/);
+  assert.equal(pages.length, 1);
+  const image = pages[0]!;
+  assert.ok(image.width === 1_000 && image.height > 1_600 && image.height <= MAX_DIFF_IMAGE_HEIGHT);
+  const [, oldText, newText] = image.text.match(/^[^\n]+\n([\s\S]+)\n↓\n([\s\S]+)$/)!;
+  assert.equal(oldText!.replace(/\s+/g, ' ').trim(), before);
+  assert.equal(newText!.replace(/\s+/g, ' ').trim(), after);
+  assert.match(image.svg, />100%<\/tspan>/);
+  assert.match(image.svg, />120%<\/tspan>/);
+  const png = await renderDiffImage(image);
+  const message: BetaMessage = { embeds: [{ title: 'Character', color: 1, footer: { text: 'Gachabase' },
+    image: { url: 'https://cdn.discordapp.com/ephemeral-attachments/333456789012345678/999456789012345678/beta-diff.png' } }] };
+  const shared = await prepareSharedMessage(message, async () => new Response(new Uint8Array(png).buffer));
+  assert.deepEqual(shared.files![0]!.data, png);
 });
 
 test('escapes source text rather than letting it introduce SVG markup or external image loads', async () => {

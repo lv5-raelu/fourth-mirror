@@ -53,6 +53,8 @@ export function compareRevisions(a: BetaRevision, b: BetaRevision): number {
   return a.revision - b.revision;
 }
 
+export const hasTrackedChanges = (revision: BetaRevision): boolean => revision.entities.length > 0;
+
 export function parseFeed(body: string, checkedAt: number): BetaFeed {
   const data = decodePage(body).map(value => record(value.data)).find(value => Array.isArray(value?.revisions));
   if (!data || !Array.isArray(data.revisions)) throw new Error('Missing beta changelog.');

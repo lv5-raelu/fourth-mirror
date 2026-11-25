@@ -7,7 +7,7 @@ import { nodeBetaMessage } from '../beta/node-message.ts';
 
 export const beta: Command = {
   data: new SlashCommandBuilder().setName(commandDefinitions.beta.name).setDescription(commandDefinitions.beta.description)
-    .addSubcommand(option => option.setName('latest').setDescription('Browse the latest Gachabase beta revision.'))
+    .addSubcommand(option => option.setName('latest').setDescription('Browse the latest Gachabase beta revision with tracked changes.'))
     .addSubcommand(option => option.setName('ask').setDescription('Ask Fourth Mirror about HSR beta changes.')
       .addStringOption(option => option.setName('question').setDescription('Mention the character or item you want to investigate.').setRequired(true).setMaxLength(1_000)))
     .addSubcommand(option => option.setName('alerts').setDescription('Manage beta notifications (Manage Server required).')
